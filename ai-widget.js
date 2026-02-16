@@ -1,106 +1,74 @@
 console.log("✅ AI Widget Loaded");
 
 (function () {
-  const API_URL = "https://three33-ai.onrender.com/recommend";
+  try {
+    const API_URL = "https://three33-ai.onrender.com/recommend";
 
-  function createWidget() {
-    // Create container
-    const container = document.createElement("div");
-    container.style.position = "fixed";
-    container.style.bottom = "20px";
-    container.style.right = "20px";
-    container.style.width = "320px";
-    container.style.background = "#ffffff";
-    container.style.border = "1px solid #ddd";
-    container.style.borderRadius = "10px";
-    container.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
-    container.style.padding = "15px";
-    container.style.fontFamily = "Arial, sans-serif";
-    container.style.zIndex = "9999";
+    function createWidget() {
+      const container = document.createElement("div");
+      container.style.position = "fixed";
+      container.style.bottom = "20px";
+      container.style.right = "20px";
+      container.style.width = "320px";
+      container.style.background = "#ffffff";
+      container.style.border = "1px solid #ddd";
+      container.style.borderRadius = "10px";
+      container.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+      container.style.padding = "15px";
+      container.style.fontFamily = "Arial, sans-serif";
+      container.style.zIndex = "9999";
 
-    // Title
-    const title = document.createElement("h4");
-    title.innerText = "AI Recommendation";
-    title.style.marginTop = "0";
-    container.appendChild(title);
+      container.innerHTML = `
+        <h4 style="margin-top:0;">AI Recommendation</h4>
+        <textarea id="ai-input" placeholder="Type your question..."
+          style="width:100%;height:60px;margin-bottom:10px;border-radius:6px;border:1px solid #ccc;padding:8px;"></textarea>
+        <button id="ai-btn"
+          style="width:100%;padding:10px;border:none;border-radius:6px;background:#4CAF50;color:#fff;cursor:pointer;">
+          Get Recommendation
+        </button>
+        <div id="ai-output" style="margin-top:10px;font-size:14px;"></div>
+      `;
 
-    // Input
-    const input = document.createElement("textarea");
-    input.placeholder = "Type your question...";
-    input.style.width = "100%";
-    input.style.height = "60px";
-    input.style.marginBottom = "10px";
-    input.style.borderRadius = "6px";
-    input.style.border = "1px solid #ccc";
-    input.style.padding = "8px";
-    container.appendChild(input);
+      document.body.appendChild(container);
 
-    // Button
-    const button = document.createElement("button");
-    button.innerText = "Get Recommendation";
-    button.style.width = "100%";
-    button.style.padding = "10px";
-    button.style.border = "none";
-    button.style.borderRadius = "6px";
-    button.style.background = "#4CAF50";
-    button.style.color = "#fff";
-    button.style.cursor = "pointer";
-    container.appendChild(button);
+      document.getElementById("ai-btn").addEventListener("click", async function () {
+        const input = document.getElementById("ai-input").value.trim();
+        const output = document.getElementById("ai-output");
 
-    // Output
-    const output = document.createElement("div");
-    output.style.marginTop = "10px";
-    output.style.fontSize = "14px";
-    container.appendChild(output);
-
-    // Button Click Logic
-    button.addEventListener("click", async function () {
-      const userInput = input.value.trim();
-
-      if (!userInput) {
-        output.innerText = "Please enter a question.";
-        return;
-      }
-
-      output.innerText = "Loading...";
-
-      try {
-        const response = await fetch(API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            prompt: userInput
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error("Server error");
+        if (!input) {
+          output.innerText = "Please enter a question.";
+          return;
         }
 
-        const data = await response.json();
+        output.innerText = "Loading...";
 
-        // Adjust this if your backend returns a different field
-        output.innerText = data.response || data.result || JSON.stringify(data);
+        try {
+          const response = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: input })
+          });
 
-      } catch (error) {
-        console.error(error);
-        output.innerText = "Error connecting to AI server.";
-      }
-    });
+          const data = await response.json();
+          output.innerText = data.response || data.result || JSON.stringify(data);
 
-    document.body.appendChild(container);
-  }
+        } catch (err) {
+          console.error("Fetch error:", err);
+          output.innerText = "Server connection error.";
+        }
+      });
+    }
 
-  // Wait for page load
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", createWidget);
-  } else {
-    createWidget();
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", createWidget);
+    } else {
+      createWidget();
+    }
+
+  } catch (err) {
+    console.error("Widget crashed:", err);
   }
 })();
-
 
     btn.disabled = false;
     btn.innerText = "Generate";
