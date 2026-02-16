@@ -18,6 +18,7 @@ console.log("✅ AI Widget Loaded");
       container.style.fontFamily = "Arial, sans-serif";
       container.style.zIndex = "9999";
 
+      // Inner HTML safely
       container.innerHTML = `
         <h4 style="margin-top:0;">AI Recommendation</h4>
         <textarea id="ai-input" placeholder="Type your question..."
@@ -31,6 +32,7 @@ console.log("✅ AI Widget Loaded");
 
       document.body.appendChild(container);
 
+      // Event listener
       document.getElementById("ai-btn").addEventListener("click", async function () {
         const input = document.getElementById("ai-input").value.trim();
         const output = document.getElementById("ai-output");
@@ -49,6 +51,10 @@ console.log("✅ AI Widget Loaded");
             body: JSON.stringify({ prompt: input })
           });
 
+          if (!response.ok) {
+            throw new Error("Server error: " + response.status);
+          }
+
           const data = await response.json();
           output.innerText = data.response || data.result || JSON.stringify(data);
 
@@ -59,6 +65,7 @@ console.log("✅ AI Widget Loaded");
       });
     }
 
+    // Init after page load
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", createWidget);
     } else {
@@ -68,9 +75,4 @@ console.log("✅ AI Widget Loaded");
   } catch (err) {
     console.error("Widget crashed:", err);
   }
-})();
-
-    btn.disabled = false;
-    btn.innerText = "Generate";
-  });
 })();
