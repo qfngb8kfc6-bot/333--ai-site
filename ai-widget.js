@@ -1,89 +1,106 @@
+console.log("✅ AI Widget Loaded");
+
 (function () {
-  const API_URL = "https://YOUR-BACKEND-URL.com/generate"; // <-- replace this
+  const API_URL = "https://three33-ai.onrender.com/recommend";
 
-  const widget = document.createElement("div");
-  widget.style.position = "fixed";
-  widget.style.bottom = "20px";
-  widget.style.right = "20px";
-  widget.style.width = "360px";
-  widget.style.background = "#ffffff";
-  widget.style.borderRadius = "14px";
-  widget.style.boxShadow = "0 10px 30px rgba(0,0,0,0.15)";
-  widget.style.padding = "16px";
-  widget.style.fontFamily = "system-ui, -apple-system, sans-serif";
-  widget.style.zIndex = "9999";
+  function createWidget() {
+    // Create container
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.bottom = "20px";
+    container.style.right = "20px";
+    container.style.width = "320px";
+    container.style.background = "#ffffff";
+    container.style.border = "1px solid #ddd";
+    container.style.borderRadius = "10px";
+    container.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+    container.style.padding = "15px";
+    container.style.fontFamily = "Arial, sans-serif";
+    container.style.zIndex = "9999";
 
-  widget.innerHTML = `
-    <div style="font-weight:600;font-size:16px;margin-bottom:6px;">
-      Tailored site highlights
-    </div>
-    <div style="font-size:13px;color:#666;margin-bottom:12px;">
-      Tell us your role/company and we'll surface what matters.
-    </div>
+    // Title
+    const title = document.createElement("h4");
+    title.innerText = "AI Recommendation";
+    title.style.marginTop = "0";
+    container.appendChild(title);
 
-    <input id="clientRole" placeholder="Your role"
-      style="width:100%;padding:8px;margin-bottom:8px;border-radius:6px;border:1px solid #ddd;" />
+    // Input
+    const input = document.createElement("textarea");
+    input.placeholder = "Type your question...";
+    input.style.width = "100%";
+    input.style.height = "60px";
+    input.style.marginBottom = "10px";
+    input.style.borderRadius = "6px";
+    input.style.border = "1px solid #ccc";
+    input.style.padding = "8px";
+    container.appendChild(input);
 
-    <input id="clientCompany" placeholder="Company"
-      style="width:100%;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid #ddd;" />
+    // Button
+    const button = document.createElement("button");
+    button.innerText = "Get Recommendation";
+    button.style.width = "100%";
+    button.style.padding = "10px";
+    button.style.border = "none";
+    button.style.borderRadius = "6px";
+    button.style.background = "#4CAF50";
+    button.style.color = "#fff";
+    button.style.cursor = "pointer";
+    container.appendChild(button);
 
-    <button id="generateBtn"
-      style="width:100%;padding:10px;background:#000;color:#fff;border:none;border-radius:8px;cursor:pointer;">
-      Generate
-    </button>
+    // Output
+    const output = document.createElement("div");
+    output.style.marginTop = "10px";
+    output.style.fontSize = "14px";
+    container.appendChild(output);
 
-    <div id="widgetResult"
-      style="margin-top:12px;font-size:13px;color:#333;"></div>
-  `;
+    // Button Click Logic
+    button.addEventListener("click", async function () {
+      const userInput = input.value.trim();
 
-  document.body.appendChild(widget);
-
-  const btn = document.getElementById("generateBtn");
-  const resultDiv = document.getElementById("widgetResult");
-
-  btn.addEventListener("click", async () => {
-    const clientRole = document.getElementById("clientRole").value.trim();
-    const clientCompany = document.getElementById("clientCompany").value.trim();
-
-    // 🔥 THIS is what your backend expects
-    const website_url = window.location.href;
-
-    if (!clientRole || !clientCompany) {
-      resultDiv.innerHTML =
-        `<span style="color:red;">Please fill in all fields.</span>`;
-      return;
-    }
-
-    btn.disabled = true;
-    btn.innerText = "Generating...";
-    resultDiv.innerHTML = "";
-
-    try {
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          clientRole: clientRole,
-          clientCompany: clientCompany,
-          website_url: website_url   // ✅ CORRECT FIELD NAME
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(JSON.stringify(data));
+      if (!userInput) {
+        output.innerText = "Please enter a question.";
+        return;
       }
 
-      resultDiv.innerHTML =
-        `<div style="white-space:pre-wrap;">${data.result || JSON.stringify(data)}</div>`;
+      output.innerText = "Loading...";
 
-    } catch (error) {
-      resultDiv.innerHTML =
-        `<span style="color:red;">${error.message}</span>`;
-    }
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            prompt: userInput
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error("Server error");
+        }
+
+        const data = await response.json();
+
+        // Adjust this if your backend returns a different field
+        output.innerText = data.response || data.result || JSON.stringify(data);
+
+      } catch (error) {
+        console.error(error);
+        output.innerText = "Error connecting to AI server.";
+      }
+    });
+
+    document.body.appendChild(container);
+  }
+
+  // Wait for page load
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", createWidget);
+  } else {
+    createWidget();
+  }
+})();
+
 
     btn.disabled = false;
     btn.innerText = "Generate";
