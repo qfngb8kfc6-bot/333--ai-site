@@ -1,4 +1,4 @@
-console.log("✅ Expandable AI Widget Loaded");
+console.log("✅ AI Website Analyzer Widget Loaded");
 
 (function () {
   const API_URL = "https://three33-ai.onrender.com/recommend";
@@ -26,7 +26,7 @@ console.log("✅ Expandable AI Widget Loaded");
 
     document.body.appendChild(toggleButton);
 
-    // Chat Window
+    // Chat Container
     const container = document.createElement("div");
     container.style.position = "fixed";
     container.style.bottom = "90px";
@@ -43,49 +43,52 @@ console.log("✅ Expandable AI Widget Loaded");
 
     container.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <strong>AI Assistant</strong>
+        <strong>AI Website Analyzer</strong>
         <span id="ai-close" style="cursor:pointer;font-size:18px;">✖</span>
       </div>
-      <textarea id="ai-input" placeholder="Ask something..."
-        style="width:100%;height:70px;margin-top:10px;border-radius:6px;border:1px solid #ccc;padding:8px;"></textarea>
+
+      <div style="margin-top:10px;font-size:13px;color:#555;">
+        Click analyze to get AI insights about this website.
+      </div>
+
       <button id="ai-send"
-        style="margin-top:10px;padding:10px;border:none;border-radius:6px;background:#4CAF50;color:#fff;cursor:pointer;">
-        Send
+        style="margin-top:12px;padding:10px;border:none;border-radius:6px;background:#4CAF50;color:#fff;cursor:pointer;">
+        Analyze This Website
       </button>
-      <div id="ai-output" style="margin-top:10px;font-size:14px;max-height:150px;overflow:auto;"></div>
+
+      <div id="ai-output"
+        style="margin-top:12px;font-size:14px;max-height:220px;overflow:auto;white-space:pre-wrap;"></div>
     `;
 
     document.body.appendChild(container);
 
-    // Toggle open
+    // Open widget
     toggleButton.addEventListener("click", function () {
       container.style.display = "flex";
       toggleButton.style.display = "none";
     });
 
-    // Close
+    // Close widget
     container.querySelector("#ai-close").addEventListener("click", function () {
       container.style.display = "none";
       toggleButton.style.display = "flex";
     });
 
-    // Send message
+    // Analyze button
     container.querySelector("#ai-send").addEventListener("click", async function () {
-      const input = container.querySelector("#ai-input").value.trim();
       const output = container.querySelector("#ai-output");
 
-      if (!input) {
-        output.innerText = "Please enter a question.";
-        return;
-      }
-
-      output.innerText = "Thinking...";
+      output.innerText = "Analyzing website...";
 
       try {
         const response = await fetch(API_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: input })
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            url: window.location.href
+          })
         });
 
         if (!response.ok) {
@@ -93,11 +96,16 @@ console.log("✅ Expandable AI Widget Loaded");
         }
 
         const data = await response.json();
-        output.innerText = data.response || data.result || JSON.stringify(data);
 
-      } catch (err) {
-        console.error(err);
-        output.innerText = "Error connecting to server.";
+        if (data.analysis) {
+          output.innerText = data.analysis;
+        } else {
+          output.innerText = "Unexpected response format.";
+        }
+
+      } catch (error) {
+        console.error(error);
+        output.innerText = "Error connecting to AI server.";
       }
     });
   }
