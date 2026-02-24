@@ -25,60 +25,50 @@ console.log("✅ AI Website Analyzer Widget Loaded");
         type="text" 
         id="ai-url-input"
         placeholder="Enter website (example.com)"
-        style="
-          width:100%;
-          padding:10px;
-          border-radius:8px;
-          border:1px solid #ddd;
-          margin-bottom:10px;
-          font-size:14px;
-        "
+        style="width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;margin-bottom:10px;font-size:14px;"
+      />
+
+      <input 
+        type="text" 
+        id="ai-niche-input"
+        placeholder="Enter client niche (e.g. sports retail tech)"
+        style="width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;margin-bottom:10px;font-size:14px;"
       />
 
       <button 
         id="ai-analyze-btn"
-        style="
-          width:100%;
-          padding:11px;
-          border:none;
-          border-radius:8px;
-          background:#4f46e5;
-          color:white;
-          font-weight:bold;
-          font-size:14px;
-          cursor:pointer;
-        "
+        style="width:100%;padding:11px;border:none;border-radius:8px;background:#4f46e5;color:white;font-weight:bold;font-size:14px;cursor:pointer;"
       >
         Analyze Website
       </button>
 
       <div 
         id="ai-result" 
-        style="
-          margin-top:14px;
-          font-size:14px;
-          white-space:pre-wrap;
-          max-height:250px;
-          overflow-y:auto;
-        "
+        style="margin-top:14px;font-size:14px;white-space:pre-wrap;max-height:250px;overflow-y:auto;"
       ></div>
     `;
 
     document.body.appendChild(widget);
 
     const button = document.getElementById("ai-analyze-btn");
-    const input = document.getElementById("ai-url-input");
+    const urlInput = document.getElementById("ai-url-input");
+    const nicheInput = document.getElementById("ai-niche-input");
     const resultDiv = document.getElementById("ai-result");
 
     button.addEventListener("click", async () => {
-      let url = input.value.trim();
+      let url = urlInput.value.trim();
+      const client_niche = nicheInput.value.trim();
 
       if (!url) {
         resultDiv.innerText = "⚠️ Please enter a website.";
         return;
       }
 
-      // Auto-fix missing protocol
+      if (!client_niche) {
+        resultDiv.innerText = "⚠️ Please enter a client niche.";
+        return;
+      }
+
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
         url = "https://" + url;
       }
@@ -91,7 +81,7 @@ console.log("✅ AI Website Analyzer Widget Loaded");
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({ url })
+          body: JSON.stringify({ url, client_niche })
         });
 
         const data = await response.json();
@@ -100,11 +90,21 @@ console.log("✅ AI Website Analyzer Widget Loaded");
           throw new Error(data.detail || "Server error");
         }
 
-        if (!data.analysis) {
-          throw new Error("No analysis returned from server.");
+        if (!data.articles || data.articles.length === 0) {
+          resultDiv.innerText = "No relevant articles found.";
+          return;
         }
 
-        resultDiv.innerText = data.analysis;
+        let output = "";
+
+        data.articles.forEach(article => {
+          output += `🔹 ${article.title}\n`;
+          output += `Score: ${article.relevance_score}\n`;
+          output += `${article.summary}\n`;
+          output += `Link: ${article.url}\n\n`;
+        });
+
+        resultDiv.innerText = output;
 
       } catch (error) {
         console.error("🔥 Widget Error:", error);
