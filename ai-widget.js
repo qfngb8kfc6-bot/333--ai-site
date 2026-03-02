@@ -1,19 +1,17 @@
 /* ============================================================
-   SGI EUROPE - Visitor Recommender Widget (COPY + PASTE READY)
-   ✅ REAL progress bar (uses /recommend_async + /progress/{task_id})
-   ✅ Inputs:
+   SGI EUROPE - INPUT WIDGET (COPY + PASTE READY)
+   ✅ Collects:
       1) Job title / role
-      2) Your website URL
-   ✅ Backend required:
-      POST  /recommend_async   body: { job_title, website_url }
-      GET   /progress/{id}     (SSE)
-   ✅ SGI-only results
+      2) Company website URL
+   ✅ Then redirects to: results.html
+   ✅ Results page will call backend and render results there
    ============================================================ */
 
-console.log("✅ SGI Europe Recommender Widget Loaded");
+console.log("✅ SGI Europe Input Widget Loaded");
 
 (function () {
-  const API_BASE = "https://three33-ai.onrender.com";
+  // If results.html is in the SAME folder as the page, leave this:
+  const RESULTS_PAGE = "results.html";
 
   // ---------- Helpers ----------
   function el(tag, attrs = {}, children = []) {
@@ -31,15 +29,6 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     return node;
   }
 
-  function escapeHtml(str) {
-    return (str || "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
   function normalizeWebsiteUrl(raw) {
     let url = (raw || "").trim();
     if (!url) return "";
@@ -47,164 +36,49 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     return url;
   }
 
-  function renderEmpty(stateEl) {
-    stateEl.innerHTML = `
-      <div style="padding:12px;border:1px dashed #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-        Enter your <b>role</b> and <b>website</b>, then click <b>Find SGI content for me</b>.
-        <div style="margin-top:8px;color:#6b7280;font-size:12px;">
-          We only recommend content from <b>sgieurope.com</b>.
-        </div>
-      </div>
-    `;
-  }
-
-  function renderError(stateEl, message) {
-    stateEl.innerHTML = `
-      <div style="padding:12px;border:1px solid #fecaca;border-radius:14px;background:#fff1f2;color:#991b1b;line-height:1.45;">
-        <b>❌ Error</b>
-        <div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(message || "Something went wrong.")}</div>
-      </div>
-    `;
-  }
-
-  function renderNoMatches(stateEl) {
-    stateEl.innerHTML = `
-      <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-        No strong matches found right now.
-        <div style="margin-top:8px;color:#6b7280;font-size:12px;">
-          Try a more specific job title (e.g. “DTC e-commerce manager”, “sports retail buyer”, “trade policy advisor”).
-        </div>
-      </div>
-    `;
-  }
-
-  function renderResults(stateEl, items) {
-    const html = items
-      .map((a) => {
-        const title = escapeHtml(a.title || "Untitled");
-        const url = escapeHtml(a.url || "#");
-        const summary = escapeHtml(a.summary || "");
-        const reason = escapeHtml(a.relevance_reason || "");
-        const score = typeof a.relevance_score === "number" ? a.relevance_score : 0;
-
-        const badgeBg =
-          score >= 90 ? "#dcfce7" : score >= 70 ? "#e0f2fe" : score >= 50 ? "#fef9c3" : "#fee2e2";
-        const badgeText =
-          score >= 90 ? "#166534" : score >= 70 ? "#075985" : score >= 50 ? "#854d0e" : "#991b1b";
-
-        return `
-          <div style="border:1px solid #e5e7eb;border-radius:16px;padding:12px;background:#fff;">
-            <div style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">
-              <div style="min-width:0;">
-                <div style="font-weight:900;font-size:14px;color:#111827;line-height:1.25;">
-                  ${title}
-                </div>
-                <a href="${url}" target="_blank" rel="noopener noreferrer"
-                   style="display:inline-block;margin-top:7px;color:#4f46e5;font-size:12px;text-decoration:none;word-break:break-all;">
-                  ${url}
-                </a>
-              </div>
-              <div style="flex:0 0 auto;">
-                <div style="padding:6px 10px;border-radius:999px;background:${badgeBg};color:${badgeText};font-weight:900;font-size:12px;">
-                  ${score}/100
-                </div>
-              </div>
-            </div>
-
-            ${summary ? `
-              <div style="margin-top:10px;color:#374151;font-size:13px;line-height:1.5;">
-                <b>Summary:</b> ${summary}
-              </div>` : ""}
-
-            ${reason ? `
-              <div style="margin-top:10px;color:#374151;font-size:13px;line-height:1.5;">
-                <b>Why it’s relevant to you:</b> ${reason}
-              </div>` : ""}
-          </div>
-        `;
-      })
-      .join("");
-
-    stateEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>`;
-  }
-
-  // Loading button helper
-  function setLoading(btn, isLoading) {
-    btn.disabled = isLoading;
-    btn.style.opacity = isLoading ? "0.78" : "1";
-    btn.style.cursor = isLoading ? "not-allowed" : "pointer";
-    btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
-  }
-
-  // REAL progress update
-  function setProgress(progressWrap, progressFill, progressText, pct, step) {
-    progressWrap.style.display = "block";
-    const safePct = Math.max(0, Math.min(100, Number(pct) || 0));
-    progressFill.style.width = safePct + "%";
-    progressText.textContent = step ? String(step) : `Working… (${safePct}%)`;
-  }
-
-  function finishProgress(progressFill, progressText) {
-    progressFill.style.width = "100%";
-    progressText.textContent = "Done ✅";
-  }
-
-  // ---------- Widget UI ----------
   function createWidget() {
     if (document.getElementById("sgi-aiw-root")) return;
 
-    // Basic styles
-    const styleTag = el("style", { id: "sgi-aiw-style" }, `
-      #sgi-aiw-root * { box-sizing: border-box; }
-      #sgi-aiw-pill:hover { transform: translateY(-1px); }
-    `);
-    document.head.appendChild(styleTag);
-
     // Pill button
-    const pill = el(
-      "button",
-      {
-        id: "sgi-aiw-pill",
-        type: "button",
-        style: {
-          position: "fixed",
-          right: "20px",
-          bottom: "20px",
-          zIndex: 999999,
-          border: "none",
-          borderRadius: "999px",
-          padding: "12px 14px",
-          background: "#111827",
-          color: "#fff",
-          display: "flex",
-          gap: "10px",
-          alignItems: "center",
-          boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
-          cursor: "pointer",
-          fontFamily:
-            "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-          fontSize: "14px",
-          fontWeight: "900",
-          letterSpacing: "0.2px",
-          transition: "transform 120ms ease",
-        },
+    const pill = el("button", {
+      id: "sgi-aiw-pill",
+      type: "button",
+      style: {
+        position: "fixed",
+        right: "20px",
+        bottom: "20px",
+        zIndex: 999999,
+        border: "none",
+        borderRadius: "999px",
+        padding: "12px 14px",
+        background: "#111827",
+        color: "#fff",
+        display: "flex",
+        gap: "10px",
+        alignItems: "center",
+        boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
+        cursor: "pointer",
+        fontFamily:
+          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
+        fontSize: "14px",
+        fontWeight: "900",
+        letterSpacing: "0.2px",
       },
-      [
-        el("span", {
-          style: {
-            width: "28px",
-            height: "28px",
-            borderRadius: "10px",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#4f46e5",
-            fontWeight: "900",
-          },
-        }, "AI"),
-        el("span", {}, "Find SGI content"),
-      ]
-    );
+    }, [
+      el("span", {
+        style: {
+          width: "28px",
+          height: "28px",
+          borderRadius: "10px",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#4f46e5",
+          fontWeight: "900",
+        },
+      }, "AI"),
+      el("span", {}, "Find SGI content"),
+    ]);
 
     // Panel
     const panel = el("div", {
@@ -257,7 +131,7 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
       el("div", {}, [
         el("div", { style: { fontWeight: "900", color: "#111827", fontSize: "14px" } }, "SGI Content Finder"),
         el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "2px", lineHeight: "1.25" } },
-          "We match SGI articles to your role + your company website."
+          "Enter your role + website. Results open on a new page."
         ),
       ]),
     ]);
@@ -285,30 +159,23 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
 
     // Body
     const body = el("div", {
-      style: {
-        padding: "14px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
-      },
+      style: { padding: "14px", display: "flex", flexDirection: "column", gap: "10px" },
     });
 
     const jobLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px" } }, "Your job title / role");
-    const jobHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: Digital marketing manager · Head of retail · Policy advisor");
+    const jobHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: Product manager · Digital marketing manager · Retail buyer");
     const jobInput = el("input", {
-      id: "sgi-aiw-job",
       type: "text",
-      placeholder: "e.g. Digital marketing manager",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
+      placeholder: "e.g. Product manager",
+      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px" },
     });
 
     const siteLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px", marginTop: "6px" } }, "Your company website URL");
-    const siteHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: https://yourcompany.com (we scan this to understand your business)");
+    const siteHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: https://yourcompany.com");
     const siteInput = el("input", {
-      id: "sgi-aiw-site",
       type: "text",
-      placeholder: "e.g. https://yourcompany.com",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
+      placeholder: "e.g. https://www.nike.com",
+      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px" },
     });
 
     function focusStyle(node) {
@@ -324,57 +191,11 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     focusStyle(jobInput);
     focusStyle(siteInput);
 
-    // Progress UI
-    const progressWrap = el("div", {
-      id: "sgi-aiw-progress",
-      style: {
-        display: "none",
-        marginTop: "8px",
-        padding: "10px",
-        border: "1px solid #e5e7eb",
-        borderRadius: "14px",
-        background: "#fafafa",
-      },
-    });
-
-    const progressText = el("div", {
-      id: "sgi-aiw-progress-text",
-      style: { fontSize: "12px", color: "#374151", fontWeight: "800", marginBottom: "8px" },
-    }, "Starting…");
-
-    const progressBar = el("div", {
-      style: {
-        height: "10px",
-        width: "100%",
-        background: "#e5e7eb",
-        borderRadius: "999px",
-        overflow: "hidden",
-      },
-    });
-
-    const progressFill = el("div", {
-      id: "sgi-aiw-progress-fill",
-      style: {
-        height: "100%",
-        width: "0%",
-        background: "linear-gradient(90deg, #4f46e5, #7c3aed)",
-        borderRadius: "999px",
-        transition: "width 250ms ease",
-      },
-    });
-
-    progressBar.appendChild(progressFill);
-    progressWrap.appendChild(progressText);
-    progressWrap.appendChild(progressBar);
-
-    // Actions
-    const actions = el("div", { style: { display: "flex", gap: "10px", alignItems: "center", marginTop: "4px" } });
-
     const goBtn = el("button", {
       type: "button",
-      id: "sgi-aiw-go",
       style: {
         width: "100%",
+        marginTop: "4px",
         padding: "12px 14px",
         borderRadius: "14px",
         border: "none",
@@ -385,24 +206,63 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         boxShadow: "0 10px 18px rgba(79,70,229,0.25)",
         fontSize: "13px",
       },
-    }, "Find SGI content for me");
+    }, "Open results page");
 
-    actions.appendChild(goBtn);
+    const note = el("div", { style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" } },
+      "We only recommend content from SGI Europe (sgieurope.com)."
+    );
 
-    const smallNote = el("div", { style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" } }, "We only recommend content from SGI Europe (sgieurope.com).");
-
-    // Results
-    const results = el("div", {
-      id: "sgi-aiw-results",
+    const errorBox = el("div", {
       style: {
-        marginTop: "2px",
-        paddingTop: "10px",
-        borderTop: "1px solid #eef2f7",
-        overflow: "auto",
-        maxHeight: "40vh",
+        display: "none",
+        padding: "10px",
+        borderRadius: "14px",
+        border: "1px solid #fecaca",
+        background: "#fff1f2",
+        color: "#991b1b",
+        fontSize: "12px",
+        lineHeight: "1.4",
+        whiteSpace: "pre-wrap",
       },
     });
-    renderEmpty(results);
+
+    function showError(msg) {
+      errorBox.style.display = "block";
+      errorBox.textContent = msg;
+    }
+    function hideError() {
+      errorBox.style.display = "none";
+      errorBox.textContent = "";
+    }
+
+    async function submit() {
+      hideError();
+      const job_title = (jobInput.value || "").trim();
+      const website_url = normalizeWebsiteUrl(siteInput.value || "");
+
+      if (!job_title || job_title.length < 2) {
+        showError("Please enter your job title / role.");
+        jobInput.focus();
+        return;
+      }
+
+      if (!website_url || website_url.length < 8) {
+        showError("Please enter a valid website URL (example: https://yourcompany.com).");
+        siteInput.focus();
+        return;
+      }
+
+      // Store data for the results page
+      sessionStorage.setItem("sgi_reco_job_title", job_title);
+      sessionStorage.setItem("sgi_reco_website_url", website_url);
+
+      // Redirect
+      window.location.href = RESULTS_PAGE;
+    }
+
+    goBtn.addEventListener("click", submit);
+    jobInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    siteInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
 
     // Footer
     const footer = el("div", {
@@ -416,29 +276,23 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         gap: "10px",
       },
     });
-
-    const powered = el("div", { style: { fontSize: "12px", color: "#6b7280" } }, "Powered by SGI Recommender");
-    const openSite = el("a", {
+    footer.appendChild(el("div", { style: { fontSize: "12px", color: "#6b7280" } }, "Powered by SGI Recommender"));
+    footer.appendChild(el("a", {
       href: "https://www.sgieurope.com/",
       target: "_blank",
       rel: "noopener noreferrer",
       style: { fontSize: "12px", color: "#4f46e5", textDecoration: "none", fontWeight: "900" },
-    }, "Open SGI ↗");
+    }, "Open SGI ↗"));
 
-    footer.appendChild(powered);
-    footer.appendChild(openSite);
-
-    // Assemble
     body.appendChild(jobLabel);
     body.appendChild(jobHint);
     body.appendChild(jobInput);
     body.appendChild(siteLabel);
     body.appendChild(siteHint);
     body.appendChild(siteInput);
-    body.appendChild(actions);
-    body.appendChild(progressWrap);
-    body.appendChild(smallNote);
-    body.appendChild(results);
+    body.appendChild(goBtn);
+    body.appendChild(note);
+    body.appendChild(errorBox);
 
     panel.appendChild(header);
     panel.appendChild(body);
@@ -447,146 +301,14 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     document.body.appendChild(pill);
     document.body.appendChild(panel);
 
-    // Open / close
     pill.addEventListener("click", () => {
       panel.style.display = "block";
       pill.style.display = "none";
       jobInput.focus();
     });
 
-    // Track current EventSource so we can cancel if user clicks again
-    let currentES = null;
-
-    function closeCurrentStream() {
-      if (currentES) {
-        try { currentES.close(); } catch {}
-        currentES = null;
-      }
-    }
-
-    async function submit() {
-      closeCurrentStream();
-
-      const job_title = (jobInput.value || "").trim();
-      const website_url = normalizeWebsiteUrl(siteInput.value || "");
-
-      if (!job_title || job_title.length < 2) {
-        renderError(results, "Please enter your job title / role.");
-        jobInput.focus();
-        return;
-      }
-
-      if (!website_url || website_url.length < 8) {
-        renderError(results, "Please enter a valid website URL (example: https://yourcompany.com).");
-        siteInput.focus();
-        return;
-      }
-
-      setLoading(goBtn, true);
-
-      // reset results while loading
-      results.innerHTML = `
-        <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;">
-          ⏳ Working…
-        </div>
-      `;
-
-      // start progress at a small value immediately
-      setProgress(progressWrap, progressFill, progressText, 5, "Queued…");
-
-      try {
-        // 1) start async job
-        const startResp = await fetch(`${API_BASE}/recommend_async`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ job_title, website_url }),
-        });
-
-        const startData = await startResp.json().catch(() => ({}));
-        if (!startResp.ok) {
-          throw new Error(startData?.detail || startData?.error || `Failed to start (HTTP ${startResp.status}).`);
-        }
-
-        const taskId = startData.task_id;
-        if (!taskId) throw new Error("No task_id returned from server.");
-
-        // 2) connect to SSE for progress updates
-        const es = new EventSource(`${API_BASE}/progress/${taskId}`);
-        currentES = es;
-
-        es.addEventListener("progress", (ev) => {
-          try {
-            const msg = JSON.parse(ev.data || "{}");
-            setProgress(progressWrap, progressFill, progressText, msg.pct, msg.step);
-          } catch {
-            // ignore malformed progress frames
-          }
-        });
-
-        es.addEventListener("done", (ev) => {
-          try {
-            const msg = JSON.parse(ev.data || "{}");
-            closeCurrentStream();
-
-            finishProgress(progressFill, progressText);
-
-            const result = msg.result || {};
-            const articles = result.articles || [];
-
-            if (!articles.length) {
-              renderNoMatches(results);
-              return;
-            }
-
-            renderResults(results, articles);
-          } catch (e) {
-            closeCurrentStream();
-            renderError(results, "Finished, but failed to parse results.");
-          } finally {
-            setLoading(goBtn, false);
-          }
-        });
-
-        es.addEventListener("error", (ev) => {
-          // Sometimes EventSource fires generic network error events without data.
-          // But your backend also sends "event: error" with JSON.
-          try {
-            if (ev && ev.data) {
-              const msg = JSON.parse(ev.data || "{}");
-              closeCurrentStream();
-              setProgress(progressWrap, progressFill, progressText, 100, "Failed ❌");
-              renderError(results, msg.error || "Failed while generating.");
-              setLoading(goBtn, false);
-              return;
-            }
-          } catch {}
-          // generic error fallback
-          closeCurrentStream();
-          setProgress(progressWrap, progressFill, progressText, 100, "Connection lost ❌");
-          renderError(results, "Connection lost while generating. Please try again.");
-          setLoading(goBtn, false);
-        });
-
-      } catch (e) {
-        console.error("🔥 Widget error:", e);
-        setProgress(progressWrap, progressFill, progressText, 100, "Failed ❌");
-        renderError(results, e?.message || "Failed to fetch.");
-        setLoading(goBtn, false);
-      }
-    }
-
-    goBtn.addEventListener("click", submit);
-
-    jobInput.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") submit();
-    });
-    siteInput.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") submit();
-    });
-
     window.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape" && panel.style.display !== "none") {
-        closeCurrentStream();
         panel.style.display = "none";
         pill.style.display = "flex";
       }
