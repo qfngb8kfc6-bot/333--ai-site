@@ -1,20 +1,17 @@
 /* ============================================================
    SGI EUROPE - Visitor Recommender Widget (COPY + PASTE READY)
-   ✅ SGI-only results (backend enforces sgieurope.com only)
+   ✅ Progress bar included
    ✅ Inputs:
       1) Job title / role
-      2) Your website URL (your company site)
+      2) Your website URL
    ✅ Calls:
       POST https://three33-ai.onrender.com/recommend
       body: { "job_title": "...", "website_url": "https://..." }
-   ✅ Renders:
-      title + link + score + summary + why relevant
    ============================================================ */
 
 console.log("✅ SGI Europe Recommender Widget Loaded");
 
 (function () {
-  // ✅ CHANGE THIS if your backend URL changes
   const API_BASE = "https://three33-ai.onrender.com";
 
   // ---------- Helpers ----------
@@ -47,21 +44,6 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     if (!url) return "";
     if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
     return url;
-  }
-
-  function setLoading(btn, isLoading) {
-    btn.disabled = isLoading;
-    btn.style.opacity = isLoading ? "0.78" : "1";
-    btn.style.cursor = isLoading ? "not-allowed" : "pointer";
-    btn.innerHTML = isLoading
-      ? `<span style="display:inline-flex;gap:10px;align-items:center;justify-content:center;">
-           <span class="sgi-aiw-spinner" style="
-             width:14px;height:14px;border-radius:999px;border:2px solid rgba(255,255,255,.45);
-             border-top-color:#fff;display:inline-block;animation:sgiSpin 0.9s linear infinite;
-           "></span>
-           Finding SGI articles…
-         </span>`
-      : "Find SGI content for me";
   }
 
   function renderEmpty(stateEl) {
@@ -131,27 +113,58 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
       })
       .join("");
 
-    stateEl.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        ${html}
-      </div>
-    `;
+    stateEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>`;
+  }
+
+  // Progress bar controls (simulated progress while waiting for backend)
+  function startProgress(barFill, barText) {
+    let progress = 8;
+    barFill.style.width = "8%";
+    barText.textContent = "Starting…";
+
+    const steps = [
+      { p: 18, t: "Checking your website…" },
+      { p: 35, t: "Extracting key topics…" },
+      { p: 55, t: "Searching SGI articles…" },
+      { p: 72, t: "Ranking relevance…" },
+      { p: 88, t: "Writing summaries…" },
+    ];
+
+    let i = 0;
+    const timer = setInterval(() => {
+      if (i < steps.length) {
+        progress = steps[i].p;
+        barFill.style.width = progress + "%";
+        barText.textContent = steps[i].t;
+        i++;
+      } else {
+        // creep slowly until completion (never reach 100% until done)
+        progress = Math.min(progress + 1, 95);
+        barFill.style.width = progress + "%";
+        barText.textContent = "Finalizing…";
+      }
+    }, 700);
+
+    return () => clearInterval(timer); // stopProgress()
+  }
+
+  function finishProgress(barFill, barText) {
+    barFill.style.width = "100%";
+    barText.textContent = "Done ✅";
   }
 
   // ---------- Widget UI ----------
   function createWidget() {
-    // Avoid double-inject
     if (document.getElementById("sgi-aiw-root")) return;
 
-    // Inject minimal keyframes (spinner)
+    // Inject keyframes
     const styleTag = el("style", { id: "sgi-aiw-style" }, `
-      @keyframes sgiSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       #sgi-aiw-root * { box-sizing: border-box; }
       #sgi-aiw-pill:hover { transform: translateY(-1px); }
     `);
     document.head.appendChild(styleTag);
 
-    // Floating pill button
+    // Pill button
     const pill = el(
       "button",
       {
@@ -181,27 +194,23 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         },
       },
       [
-        el(
-          "span",
-          {
-            style: {
-              width: "28px",
-              height: "28px",
-              borderRadius: "10px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#4f46e5",
-              fontWeight: "900",
-            },
+        el("span", {
+          style: {
+            width: "28px",
+            height: "28px",
+            borderRadius: "10px",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#4f46e5",
+            fontWeight: "900",
           },
-          "AI"
-        ),
+        }, "AI"),
         el("span", {}, "Find SGI content"),
       ]
     );
 
-    // Panel container
+    // Panel
     const panel = el("div", {
       id: "sgi-aiw-root",
       style: {
@@ -288,52 +297,22 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
       },
     });
 
-    // Field: Job title
-    const jobLabel = el("div", {
-      style: { color: "#111827", fontWeight: "900", fontSize: "13px" },
-    }, "Your job title / role");
-
-    const jobHint = el("div", {
-      style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" },
-    }, "Example: Digital marketing manager · Head of retail · Policy advisor");
-
+    const jobLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px" } }, "Your job title / role");
+    const jobHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: Digital marketing manager · Head of retail · Policy advisor");
     const jobInput = el("input", {
       id: "sgi-aiw-job",
       type: "text",
       placeholder: "e.g. Digital marketing manager",
-      style: {
-        width: "100%",
-        padding: "12px",
-        borderRadius: "14px",
-        border: "1px solid #e5e7eb",
-        outline: "none",
-        fontSize: "13px",
-        background: "#fff",
-      },
+      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
     });
 
-    // Field: Website URL
-    const siteLabel = el("div", {
-      style: { color: "#111827", fontWeight: "900", fontSize: "13px", marginTop: "6px" },
-    }, "Your company website URL");
-
-    const siteHint = el("div", {
-      style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" },
-    }, "Example: https://yourcompany.com (we scan this to understand your business)");
-
+    const siteLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px", marginTop: "6px" } }, "Your company website URL");
+    const siteHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: https://yourcompany.com (we scan this to understand your business)");
     const siteInput = el("input", {
       id: "sgi-aiw-site",
       type: "text",
       placeholder: "e.g. https://yourcompany.com",
-      style: {
-        width: "100%",
-        padding: "12px",
-        borderRadius: "14px",
-        border: "1px solid #e5e7eb",
-        outline: "none",
-        fontSize: "13px",
-        background: "#fff",
-      },
+      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
     });
 
     function focusStyle(node) {
@@ -349,7 +328,50 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     focusStyle(jobInput);
     focusStyle(siteInput);
 
-    // Button row
+    // Progress UI (hidden until request starts)
+    const progressWrap = el("div", {
+      id: "sgi-aiw-progress",
+      style: {
+        display: "none",
+        marginTop: "8px",
+        padding: "10px",
+        border: "1px solid #e5e7eb",
+        borderRadius: "14px",
+        background: "#fafafa",
+      },
+    });
+
+    const progressText = el("div", {
+      id: "sgi-aiw-progress-text",
+      style: { fontSize: "12px", color: "#374151", fontWeight: "800", marginBottom: "8px" },
+    }, "Starting…");
+
+    const progressBar = el("div", {
+      style: {
+        height: "10px",
+        width: "100%",
+        background: "#e5e7eb",
+        borderRadius: "999px",
+        overflow: "hidden",
+      },
+    });
+
+    const progressFill = el("div", {
+      id: "sgi-aiw-progress-fill",
+      style: {
+        height: "100%",
+        width: "0%",
+        background: "linear-gradient(90deg, #4f46e5, #7c3aed)",
+        borderRadius: "999px",
+        transition: "width 250ms ease",
+      },
+    });
+
+    progressBar.appendChild(progressFill);
+    progressWrap.appendChild(progressText);
+    progressWrap.appendChild(progressBar);
+
+    // Actions
     const actions = el("div", { style: { display: "flex", gap: "10px", alignItems: "center", marginTop: "4px" } });
 
     const goBtn = el("button", {
@@ -371,9 +393,7 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
 
     actions.appendChild(goBtn);
 
-    const smallNote = el("div", {
-      style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" },
-    }, "We only recommend content from SGI Europe (sgieurope.com).");
+    const smallNote = el("div", { style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" } }, "We only recommend content from SGI Europe (sgieurope.com).");
 
     // Results
     const results = el("div", {
@@ -386,7 +406,6 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         maxHeight: "40vh",
       },
     });
-
     renderEmpty(results);
 
     // Footer
@@ -417,12 +436,11 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     body.appendChild(jobLabel);
     body.appendChild(jobHint);
     body.appendChild(jobInput);
-
     body.appendChild(siteLabel);
     body.appendChild(siteHint);
     body.appendChild(siteInput);
-
     body.appendChild(actions);
+    body.appendChild(progressWrap); // ✅ progress bar area
     body.appendChild(smallNote);
     body.appendChild(results);
 
@@ -430,18 +448,15 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     panel.appendChild(body);
     panel.appendChild(footer);
 
-    // Inject
     document.body.appendChild(pill);
     document.body.appendChild(panel);
 
-    // Events
     pill.addEventListener("click", () => {
       panel.style.display = "block";
       pill.style.display = "none";
       jobInput.focus();
     });
 
-    // Submit function
     async function submit() {
       const job_title = (jobInput.value || "").trim();
       const website_url = normalizeWebsiteUrl(siteInput.value || "");
@@ -458,12 +473,18 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         return;
       }
 
-      setLoading(goBtn, true);
+      // Show progress bar + start simulated progress
+      progressWrap.style.display = "block";
+      const stopProgress = startProgress(progressFill, progressText);
+
+      // Reset results area while loading
       results.innerHTML = `
         <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;">
-          ⏳ Scanning your website and matching SGI coverage…
+          ⏳ Working…
         </div>
       `;
+
+      setLoading(goBtn, true);
 
       try {
         const resp = await fetch(`${API_BASE}/recommend`, {
@@ -483,11 +504,14 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
           throw new Error(data?.detail || data?.error || `Server error (HTTP ${resp.status}).`);
         }
 
-        if (data?.error) {
-          throw new Error(data.error);
-        }
+        if (data?.error) throw new Error(data.error);
 
         const articles = data?.articles || [];
+
+        // Stop simulated progress + complete it
+        stopProgress();
+        finishProgress(progressFill, progressText);
+
         if (!articles.length) {
           results.innerHTML = `
             <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
@@ -503,16 +527,29 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         renderResults(results, articles);
       } catch (e) {
         console.error("🔥 Widget error:", e);
+        progressText.textContent = "Failed ❌";
         renderError(results, e?.message || "Failed to fetch.");
       } finally {
         setLoading(goBtn, false);
+
+        // Optional: hide progress after a moment (keep if you want it visible)
+        setTimeout(() => {
+          // If you want it to always stay visible, delete the next line:
+          // progressWrap.style.display = "none";
+        }, 1200);
       }
     }
 
-    // Button click
+    // Add loading button helper
+    function setLoading(btn, isLoading) {
+      btn.disabled = isLoading;
+      btn.style.opacity = isLoading ? "0.78" : "1";
+      btn.style.cursor = isLoading ? "not-allowed" : "pointer";
+      btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
+    }
+
     goBtn.addEventListener("click", submit);
 
-    // Enter-to-submit
     jobInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") submit();
     });
@@ -520,7 +557,6 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
       if (ev.key === "Enter") submit();
     });
 
-    // ESC to close
     window.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape" && panel.style.display !== "none") {
         panel.style.display = "none";
