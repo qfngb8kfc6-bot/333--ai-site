@@ -1,12 +1,13 @@
 /* ============================================================
    SGI EUROPE - Visitor Recommender Widget (COPY + PASTE READY)
-   ✅ Progress bar included
+   ✅ REAL progress bar (uses /recommend_async + /progress/{task_id})
    ✅ Inputs:
       1) Job title / role
       2) Your website URL
-   ✅ Calls:
-      POST https://three33-ai.onrender.com/recommend
-      body: { "job_title": "...", "website_url": "https://..." }
+   ✅ Backend required:
+      POST  /recommend_async   body: { job_title, website_url }
+      GET   /progress/{id}     (SSE)
+   ✅ SGI-only results
    ============================================================ */
 
 console.log("✅ SGI Europe Recommender Widget Loaded");
@@ -66,6 +67,17 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     `;
   }
 
+  function renderNoMatches(stateEl) {
+    stateEl.innerHTML = `
+      <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
+        No strong matches found right now.
+        <div style="margin-top:8px;color:#6b7280;font-size:12px;">
+          Try a more specific job title (e.g. “DTC e-commerce manager”, “sports retail buyer”, “trade policy advisor”).
+        </div>
+      </div>
+    `;
+  }
+
   function renderResults(stateEl, items) {
     const html = items
       .map((a) => {
@@ -116,48 +128,32 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     stateEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>`;
   }
 
-  // Progress bar controls (simulated progress while waiting for backend)
-  function startProgress(barFill, barText) {
-    let progress = 8;
-    barFill.style.width = "8%";
-    barText.textContent = "Starting…";
-
-    const steps = [
-      { p: 18, t: "Checking your website…" },
-      { p: 35, t: "Extracting key topics…" },
-      { p: 55, t: "Searching SGI articles…" },
-      { p: 72, t: "Ranking relevance…" },
-      { p: 88, t: "Writing summaries…" },
-    ];
-
-    let i = 0;
-    const timer = setInterval(() => {
-      if (i < steps.length) {
-        progress = steps[i].p;
-        barFill.style.width = progress + "%";
-        barText.textContent = steps[i].t;
-        i++;
-      } else {
-        // creep slowly until completion (never reach 100% until done)
-        progress = Math.min(progress + 1, 95);
-        barFill.style.width = progress + "%";
-        barText.textContent = "Finalizing…";
-      }
-    }, 700);
-
-    return () => clearInterval(timer); // stopProgress()
+  // Loading button helper
+  function setLoading(btn, isLoading) {
+    btn.disabled = isLoading;
+    btn.style.opacity = isLoading ? "0.78" : "1";
+    btn.style.cursor = isLoading ? "not-allowed" : "pointer";
+    btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
   }
 
-  function finishProgress(barFill, barText) {
-    barFill.style.width = "100%";
-    barText.textContent = "Done ✅";
+  // REAL progress update
+  function setProgress(progressWrap, progressFill, progressText, pct, step) {
+    progressWrap.style.display = "block";
+    const safePct = Math.max(0, Math.min(100, Number(pct) || 0));
+    progressFill.style.width = safePct + "%";
+    progressText.textContent = step ? String(step) : `Working… (${safePct}%)`;
+  }
+
+  function finishProgress(progressFill, progressText) {
+    progressFill.style.width = "100%";
+    progressText.textContent = "Done ✅";
   }
 
   // ---------- Widget UI ----------
   function createWidget() {
     if (document.getElementById("sgi-aiw-root")) return;
 
-    // Inject keyframes
+    // Basic styles
     const styleTag = el("style", { id: "sgi-aiw-style" }, `
       #sgi-aiw-root * { box-sizing: border-box; }
       #sgi-aiw-pill:hover { transform: translateY(-1px); }
@@ -328,7 +324,7 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     focusStyle(jobInput);
     focusStyle(siteInput);
 
-    // Progress UI (hidden until request starts)
+    // Progress UI
     const progressWrap = el("div", {
       id: "sgi-aiw-progress",
       style: {
@@ -440,7 +436,7 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     body.appendChild(siteHint);
     body.appendChild(siteInput);
     body.appendChild(actions);
-    body.appendChild(progressWrap); // ✅ progress bar area
+    body.appendChild(progressWrap);
     body.appendChild(smallNote);
     body.appendChild(results);
 
@@ -451,13 +447,26 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     document.body.appendChild(pill);
     document.body.appendChild(panel);
 
+    // Open / close
     pill.addEventListener("click", () => {
       panel.style.display = "block";
       pill.style.display = "none";
       jobInput.focus();
     });
 
+    // Track current EventSource so we can cancel if user clicks again
+    let currentES = null;
+
+    function closeCurrentStream() {
+      if (currentES) {
+        try { currentES.close(); } catch {}
+        currentES = null;
+      }
+    }
+
     async function submit() {
+      closeCurrentStream();
+
       const job_title = (jobInput.value || "").trim();
       const website_url = normalizeWebsiteUrl(siteInput.value || "");
 
@@ -473,79 +482,97 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         return;
       }
 
-      // Show progress bar + start simulated progress
-      progressWrap.style.display = "block";
-      const stopProgress = startProgress(progressFill, progressText);
+      setLoading(goBtn, true);
 
-      // Reset results area while loading
+      // reset results while loading
       results.innerHTML = `
         <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;">
           ⏳ Working…
         </div>
       `;
 
-      setLoading(goBtn, true);
+      // start progress at a small value immediately
+      setProgress(progressWrap, progressFill, progressText, 5, "Queued…");
 
       try {
-        const resp = await fetch(`${API_BASE}/recommend`, {
+        // 1) start async job
+        const startResp = await fetch(`${API_BASE}/recommend_async`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ job_title, website_url }),
         });
 
-        let data = null;
-        try {
-          data = await resp.json();
-        } catch {
-          throw new Error(`Server returned invalid JSON (HTTP ${resp.status}).`);
+        const startData = await startResp.json().catch(() => ({}));
+        if (!startResp.ok) {
+          throw new Error(startData?.detail || startData?.error || `Failed to start (HTTP ${startResp.status}).`);
         }
 
-        if (!resp.ok) {
-          throw new Error(data?.detail || data?.error || `Server error (HTTP ${resp.status}).`);
-        }
+        const taskId = startData.task_id;
+        if (!taskId) throw new Error("No task_id returned from server.");
 
-        if (data?.error) throw new Error(data.error);
+        // 2) connect to SSE for progress updates
+        const es = new EventSource(`${API_BASE}/progress/${taskId}`);
+        currentES = es;
 
-        const articles = data?.articles || [];
+        es.addEventListener("progress", (ev) => {
+          try {
+            const msg = JSON.parse(ev.data || "{}");
+            setProgress(progressWrap, progressFill, progressText, msg.pct, msg.step);
+          } catch {
+            // ignore malformed progress frames
+          }
+        });
 
-        // Stop simulated progress + complete it
-        stopProgress();
-        finishProgress(progressFill, progressText);
+        es.addEventListener("done", (ev) => {
+          try {
+            const msg = JSON.parse(ev.data || "{}");
+            closeCurrentStream();
 
-        if (!articles.length) {
-          results.innerHTML = `
-            <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-              No strong matches found right now.
-              <div style="margin-top:8px;color:#6b7280;font-size:12px;">
-                Try a more specific job title (e.g. “DTC e-commerce manager”, “sports retail buyer”, “trade policy advisor”).
-              </div>
-            </div>
-          `;
-          return;
-        }
+            finishProgress(progressFill, progressText);
 
-        renderResults(results, articles);
+            const result = msg.result || {};
+            const articles = result.articles || [];
+
+            if (!articles.length) {
+              renderNoMatches(results);
+              return;
+            }
+
+            renderResults(results, articles);
+          } catch (e) {
+            closeCurrentStream();
+            renderError(results, "Finished, but failed to parse results.");
+          } finally {
+            setLoading(goBtn, false);
+          }
+        });
+
+        es.addEventListener("error", (ev) => {
+          // Sometimes EventSource fires generic network error events without data.
+          // But your backend also sends "event: error" with JSON.
+          try {
+            if (ev && ev.data) {
+              const msg = JSON.parse(ev.data || "{}");
+              closeCurrentStream();
+              setProgress(progressWrap, progressFill, progressText, 100, "Failed ❌");
+              renderError(results, msg.error || "Failed while generating.");
+              setLoading(goBtn, false);
+              return;
+            }
+          } catch {}
+          // generic error fallback
+          closeCurrentStream();
+          setProgress(progressWrap, progressFill, progressText, 100, "Connection lost ❌");
+          renderError(results, "Connection lost while generating. Please try again.");
+          setLoading(goBtn, false);
+        });
+
       } catch (e) {
         console.error("🔥 Widget error:", e);
-        progressText.textContent = "Failed ❌";
+        setProgress(progressWrap, progressFill, progressText, 100, "Failed ❌");
         renderError(results, e?.message || "Failed to fetch.");
-      } finally {
         setLoading(goBtn, false);
-
-        // Optional: hide progress after a moment (keep if you want it visible)
-        setTimeout(() => {
-          // If you want it to always stay visible, delete the next line:
-          // progressWrap.style.display = "none";
-        }, 1200);
       }
-    }
-
-    // Add loading button helper
-    function setLoading(btn, isLoading) {
-      btn.disabled = isLoading;
-      btn.style.opacity = isLoading ? "0.78" : "1";
-      btn.style.cursor = isLoading ? "not-allowed" : "pointer";
-      btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
     }
 
     goBtn.addEventListener("click", submit);
@@ -559,6 +586,7 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
 
     window.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape" && panel.style.display !== "none") {
+        closeCurrentStream();
         panel.style.display = "none";
         pill.style.display = "flex";
       }
