@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SGI Recommendations</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: #0b1220;
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 1050px;
+      margin: 0 auto;
+      padding: 28px 18px 60px;
+    }
+    .card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 18px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.35);
+      overflow: hidden;
+    }
+    .top {
+      padding: 18px 18px 14px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+    }
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      min-width: 0;
+    }
+    .logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 16px;
+      background: #4f46e5;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      color: #fff;
+      flex: 0 0 auto;
+    }
+    .title {
+      font-weight: 900;
+      font-size: 16px;
+      margin: 0;
+      color: #fff;
+      line-height: 1.2;
+    }
+    .sub {
+      margin: 2px 0 0;
+      font-size: 12px;
+      color: rgba(255,255,255,0.72);
+      line-height: 1.25;
+    }
+    .meta {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px;
+      color: rgba(255,255,255,0.88);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .actions a, .actions button {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 12px;
+    }
+    .actions a:hover, .actions button:hover { background: rgba(255,255,255,0.10); }
+    .body {
+      padding: 18px;
+    }
+    .progressBox {
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .progressText {
+      font-size: 12px;
+      color: rgba(255,255,255,0.85);
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+    .bar {
+      height: 10px;
+      width: 100%;
+      background: rgba(255,255,255,0.10);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #4f46e5, #7c3aed);
+      border-radius: 999px;
+      transition: width 240ms ease;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .item {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 16px;
+      padding: 14px;
+      overflow: hidden;
+    }
+    .itemTop {
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .itemTitle {
+      font-weight: 900;
+      color: #fff;
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.25;
+    }
+    .score {
+      flex: 0 0 auto;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      font-size: 12px;
+      background: rgba(79,70,229,0.22);
+      border: 1px solid rgba(79,70,229,0.35);
+      color: #c7d2fe;
+    }
+    .link {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #a5b4fc;
+      text-decoration: none;
+      word-break: break-all;
+    }
+    .link:hover { text-decoration: underline; }
+    .p {
+      margin: 10px 0 0;
+      color: rgba(255,255,255,0.82);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .muted { color: rgba(255,255,255,0.65); }
+    .error {
+      border: 1px solid rgba(239,68,68,0.35);
+      background: rgba(239,68,68,0.15);
+      color: #fecaca;
+      border-radius: 16px;
+      padding: 12px;
+      white-space: pre-wrap;
+      line-height: 1.4;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div class="brand">
+          <div class="logo">SGI</div>
+          <div style="min-width:0;">
+            <p class="title">Your SGI Recommendations</p>
+            <p class="sub">We match SGI Europe content to your role and your company website.</p>
+            <div class="meta" id="meta"></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="backBtn" type="button">← Back</button>
+          <a href="https://www.sgieurope.com/" target="_blank" rel="noopener">Open SGI ↗</a>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="progressBox" id="progressBox">
+          <div class="progressText" id="progressText">Starting…</div>
+          <div class="bar"><div class="fill" id="progressFill"></div></div>
+        </div>
+
+        <div id="content"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ✅ Backend URL (must match your deployed Render app)
+    const API_BASE = "https://three33-ai.onrender.com";
+
+    const metaEl = document.getElementById("meta");
+    const contentEl = document.getElementById("content");
+    const progressBox = document.getElementById("progressBox");
+    const progressText = document.getElementById("progressText");
+    const progressFill = document.getElementById("progressFill");
+
+    document.getElementById("backBtn").addEventListener("click", () => {
+      // return to previous page (your widget page)
+      history.back();
+    });
+
+    function esc(s) {
+      return (s || "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function startProgress() {
+      let progress = 8;
+      progressFill.style.width = "8%";
+      progressText.textContent = "Starting…";
+
+      const steps = [
+        { p: 18, t: "Checking your website…" },
+        { p: 35, t: "Extracting key topics…" },
+        { p: 55, t: "Searching SGI articles…" },
+        { p: 72, t: "Ranking relevance…" },
+        { p: 88, t: "Writing summaries…" },
+      ];
+
+      let i = 0;
+      const timer = setInterval(() => {
+        if (i < steps.length) {
+          progress = steps[i].p;
+          progressFill.style.width = progress + "%";
+          progressText.textContent = steps[i].t;
+          i++;
+        } else {
+          progress = Math.min(progress + 1, 95);
+          progressFill.style.width = progress + "%";
+          progressText.textContent = "Finalizing…";
+        }
+      }, 650);
+
+      return () => clearInterval(timer);
+    }
+
+    function finishProgress(ok = true) {
+      progressFill.style.width = "100%";
+      progressText.textContent = ok ? "Done ✅" : "Failed ❌";
+    }
+
+    function renderError(message) {
+      contentEl.innerHTML = `<div class="error"><b>❌ Error</b>\n\n${esc(message || "Something went wrong.")}</div>`;
+    }
+
+    function renderEmpty() {
+      contentEl.innerHTML = `
+        <div class="item">
+          <p class="itemTitle">No strong matches found right now.</p>
+          <p class="p muted">Try a more specific role (e.g. “DTC e-commerce manager”, “sports retail buyer”, “trade policy advisor”).</p>
+        </div>
+      `;
+    }
+
+    function scoreBadge(score) {
+      // keep your current style; easy to change later to match your reference design
+      return `${Math.round(score || 0)}/100`;
+    }
+
+    function renderArticles(articles) {
+      const cards = articles.map(a => `
+        <div class="item">
+          <div class="itemTop">
+            <div style="min-width:0;">
+              <p class="itemTitle">${esc(a.title || "Untitled")}</p>
+              <a class="link" href="${esc(a.url || "#")}" target="_blank" rel="noopener">${esc(a.url || "")}</a>
+            </div>
+            <div class="score">${scoreBadge(a.relevance_score)}</div>
+          </div>
+          ${a.summary ? `<p class="p"><b>Summary:</b> ${esc(a.summary)}</p>` : ""}
+          ${a.relevance_reason ? `<p class="p"><b>Why it’s relevant:</b> ${esc(a.relevance_reason)}</p>` : ""}
+        </div>
+      `).join("");
+
+      contentEl.innerHTML = `<div class="grid">${cards}</div>`;
+    }
+
+    async function main() {
+      const job_title = (sessionStorage.getItem("sgi_reco_job_title") || "").trim();
+      const website_url = (sessionStorage.getItem("sgi_reco_website_url") || "").trim();
+
+      // Show meta chips
+      if (job_title) metaEl.insertAdjacentHTML("beforeend", `<div class="chip">Role: ${esc(job_title)}</div>`);
+      if (website_url) metaEl.insertAdjacentHTML("beforeend", `<div class="chip">Website: ${esc(website_url)}</div>`);
+
+      if (!job_title || !website_url) {
+        progressBox.style.display = "none";
+        renderError("Missing data. Please go back and submit your role + website again.");
+        return;
+      }
+
+      const stop = startProgress();
+
+      try {
+        const resp = await fetch(`${API_BASE}/recommend`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_title, website_url })
+        });
+
+        let data;
+        try {
+          data = await resp.json();
+        } catch {
+          throw new Error(`Server returned invalid JSON (HTTP ${resp.status}).`);
+        }
+
+        if (!resp.ok) throw new Error(data?.detail || data?.error || `Server error (HTTP ${resp.status}).`);
+        if (data?.error) throw new Error(data.error);
+
+        stop();
+        finishProgress(true);
+
+        const articles = data?.articles || [];
+        if (!articles.length) return renderEmpty();
+        renderArticles(articles);
+
+      } catch (e) {
+        console.error(e);
+        stop();
+        finishProgress(false);
+        renderError(e?.message || "Failed to fetch.");
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
