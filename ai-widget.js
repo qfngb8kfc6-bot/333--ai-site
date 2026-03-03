@@ -1,40 +1,22 @@
 /* ============================================================
-   SGI EUROPE - Visitor Recommender Widget (COPY + PASTE READY)
-   ✅ Same features as before
-   ✅ Smooth % animation (no jumps)
-   ✅ “Real progress sync” support via streamed stages
-      - Tries: POST  /recommend/stream   (text/event-stream OR NDJSON)
-      - Falls back: POST  /recommend     (normal JSON)
-   ✅ Inputs:
-      1) job_title
-      2) website_url
+   SGI EUROPE - CONTENT FINDER (STRIP BAR UI)  ✅ COPY/PASTE READY
+   - Full-width bottom strip (not a floating card)
+   - Keeps same fields: Job title/role + Company website URL
+   - Keeps features: progress bar + stage text + smooth % animation
+   - Adds: results drawer (slides up) while the strip stays as the “control bar”
+   - Calls backend:
+       POST https://three33-ai.onrender.com/recommend
+       body: { "job_title": "...", "website_url": "https://..." }
    ============================================================ */
 
-console.log("✅ SGI Europe Recommender Widget Loaded");
+console.log("✅ SGI Strip Widget Loaded");
 
 (function () {
   const API_BASE = "https://three33-ai.onrender.com";
-  const API_RECOMMEND = `${API_BASE}/recommend`;
-  const API_RECOMMEND_STREAM = `${API_BASE}/recommend/stream`; // backend must implement for true stage sync
 
   // -----------------------------
   // Helpers
   // -----------------------------
-  function el(tag, attrs = {}, children = []) {
-    const node = document.createElement(tag);
-    Object.entries(attrs).forEach(([k, v]) => {
-      if (k === "style") Object.assign(node.style, v);
-      else if (k === "className") node.className = v;
-      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
-      else node.setAttribute(k, v);
-    });
-    (Array.isArray(children) ? children : [children]).forEach((c) => {
-      if (c == null) return;
-      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-    });
-    return node;
-  }
-
   function escapeHtml(str) {
     return (str || "")
       .replaceAll("&", "&amp;")
@@ -51,37 +33,403 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     return url;
   }
 
-  function setLoading(btn, isLoading) {
-    btn.disabled = isLoading;
-    btn.style.opacity = isLoading ? "0.78" : "1";
-    btn.style.cursor = isLoading ? "not-allowed" : "pointer";
-    btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
   }
 
-  function renderEmpty(stateEl) {
-    stateEl.innerHTML = `
-      <div style="padding:12px;border:1px dashed #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-        Enter your <b>role</b> and <b>website</b>, then click <b>Find SGI content for me</b>.
-        <div style="margin-top:8px;color:#6b7280;font-size:12px;">
-          We only recommend content from <b>sgieurope.com</b>.
-        </div>
-      </div>
+  // Smooth progress animator (percent + bar width)
+  function createProgressAnimator({ onUpdate }) {
+    let current = 0;
+    let target = 0;
+    let raf = null;
+    let lastTs = 0;
+
+    function step(ts) {
+      if (!lastTs) lastTs = ts;
+      const dt = Math.min(0.05, (ts - lastTs) / 1000);
+      lastTs = ts;
+
+      // critically-damped-ish easing: move a % of the remaining distance
+      const diff = target - current;
+      const speed = 10; // larger = snappier
+      current = current + diff * (1 - Math.exp(-speed * dt));
+
+      // snap if very close
+      if (Math.abs(diff) < 0.15) current = target;
+
+      onUpdate(current);
+
+      if (current !== target) raf = requestAnimationFrame(step);
+      else raf = null;
+    }
+
+    function setTarget(p) {
+      target = clamp(p, 0, 100);
+      if (!raf) {
+        lastTs = 0;
+        raf = requestAnimationFrame(step);
+      }
+    }
+
+    function setInstant(p) {
+      current = clamp(p, 0, 100);
+      target = current;
+      if (raf) cancelAnimationFrame(raf);
+      raf = null;
+      onUpdate(current);
+    }
+
+    function getCurrent() {
+      return current;
+    }
+
+    return { setTarget, setInstant, getCurrent };
+  }
+
+  // Stage mapping (used when backend doesn't provide explicit progress)
+  const STAGES = [
+    { key: "starting", pct: 6, text: "Starting…" },
+    { key: "fetching_company_site", pct: 18, text: "Checking your website…" },
+    { key: "extracting_signals", pct: 32, text: "Extracting key topics…" },
+    { key: "collecting_sgi_links", pct: 48, text: "Scanning SGI sections…" },
+    { key: "fetching_sgi_pages", pct: 66, text: "Reading SGI pages…" },
+    { key: "scoring", pct: 80, text: "Ranking relevance…" },
+    { key: "summarizing", pct: 90, text: "Writing summaries…" },
+    { key: "finalizing", pct: 96, text: "Finalizing…" },
+    { key: "done", pct: 100, text: "Done ✅" },
+  ];
+
+  function stageByKey(key) {
+    return STAGES.find((s) => s.key === key) || STAGES[0];
+  }
+
+  // If your backend later returns progress info, this will “sync” to it.
+  // Supported (optional) response shapes:
+  //   { meta: { stage: "scoring", progress: 80, message: "..." }, articles: [...] }
+  //   { progress: { stage: "...", percent: 50, message: "..." }, articles: [...] }
+  function readBackendProgress(data) {
+    const meta = data?.meta || data?.progress || null;
+    if (!meta) return null;
+
+    const stage = meta.stage || meta.key || null;
+    const percent =
+      typeof meta.progress === "number"
+        ? meta.progress
+        : typeof meta.percent === "number"
+          ? meta.percent
+          : null;
+    const message = meta.message || meta.text || null;
+
+    return { stage, percent, message };
+  }
+
+  // -----------------------------
+  // UI Creation
+  // -----------------------------
+  function injectStyles() {
+    if (document.getElementById("sgi-strip-widget-styles")) return;
+
+    const css = `
+      :root{
+        --sgi-purple:#4f46e5;
+        --sgi-purple-2:#7c3aed;
+        --sgi-ink:#111827;
+        --sgi-muted:#6b7280;
+        --sgi-border:#e5e7eb;
+        --sgi-bg:#ffffff;
+        --sgi-soft:#f8fafc;
+        --sgi-shadow: 0 18px 60px rgba(0,0,0,0.22);
+      }
+
+      #sgi-strip-root, #sgi-strip-root * { box-sizing: border-box; }
+
+      /* Bottom strip bar */
+      #sgi-strip-root {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 999999;
+        background: var(--sgi-bg);
+        border-top: 1px solid var(--sgi-border);
+        box-shadow: 0 -10px 28px rgba(0,0,0,0.10);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji;
+      }
+
+      #sgi-strip-inner {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 12px 14px;
+      }
+
+      /* Row 1 (inputs + button) */
+      #sgi-strip-row1 {
+        display: grid;
+        grid-template-columns: 220px 1fr 1fr 220px 38px;
+        gap: 10px;
+        align-items: center;
+      }
+
+      /* Responsive */
+      @media (max-width: 980px){
+        #sgi-strip-row1 {
+          grid-template-columns: 1fr 1fr 160px 38px;
+        }
+        #sgi-strip-brand { display:none; }
+      }
+      @media (max-width: 720px){
+        #sgi-strip-row1 {
+          grid-template-columns: 1fr 1fr 38px;
+          grid-auto-rows: auto;
+        }
+        #sgi-strip-job-wrap { grid-column: 1 / span 1; }
+        #sgi-strip-site-wrap { grid-column: 2 / span 1; }
+        #sgi-strip-btn { grid-column: 1 / span 2; }
+      }
+
+      #sgi-strip-brand {
+        display:flex;
+        align-items:center;
+        gap:10px;
+        min-width: 0;
+      }
+      #sgi-strip-badge {
+        width: 38px;
+        height: 38px;
+        border-radius: 14px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:#fff;
+        font-weight: 900;
+        background: linear-gradient(135deg, var(--sgi-purple), var(--sgi-purple-2));
+      }
+      #sgi-strip-title {
+        min-width: 0;
+      }
+      #sgi-strip-title .h {
+        font-weight: 900;
+        color: var(--sgi-ink);
+        font-size: 13px;
+        line-height: 1.15;
+      }
+      #sgi-strip-title .s {
+        color: var(--sgi-muted);
+        font-size: 11px;
+        line-height: 1.15;
+        margin-top: 2px;
+      }
+
+      .sgi-input-label {
+        font-size: 11px;
+        color: var(--sgi-muted);
+        font-weight: 800;
+        margin-bottom: 6px;
+      }
+
+      .sgi-input {
+        width: 100%;
+        height: 44px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid var(--sgi-border);
+        outline: none;
+        font-size: 13px;
+        background: #fff;
+        color: var(--sgi-ink);
+      }
+      .sgi-input:focus{
+        border-color:#c7d2fe;
+        box-shadow: 0 0 0 4px rgba(79,70,229,0.12);
+      }
+
+      #sgi-strip-btn {
+        height: 44px;
+        border: none;
+        border-radius: 14px;
+        background: var(--sgi-purple);
+        color: #fff;
+        font-weight: 900;
+        cursor: pointer;
+        box-shadow: 0 10px 18px rgba(79,70,229,0.25);
+        transition: transform 120ms ease, opacity 120ms ease;
+        font-size: 13px;
+      }
+      #sgi-strip-btn:hover { transform: translateY(-1px); }
+      #sgi-strip-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+
+      #sgi-strip-close {
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        border: 1px solid var(--sgi-border);
+        background: #fff;
+        cursor: pointer;
+        font-weight: 900;
+        color: var(--sgi-ink);
+      }
+
+      /* Row 2 (progress) */
+      #sgi-strip-row2 {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--sgi-border);
+        border-radius: 14px;
+        background: var(--sgi-soft);
+        display: none; /* shown during runs */
+      }
+      #sgi-strip-progress-top {
+        display:flex;
+        align-items:center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      #sgi-strip-progress-text {
+        font-size: 12px;
+        color: #374151;
+        font-weight: 900;
+      }
+      #sgi-strip-progress-pct {
+        font-size: 12px;
+        color: #374151;
+        font-weight: 900;
+      }
+      #sgi-strip-progress-track {
+        height: 10px;
+        width: 100%;
+        background: #e5e7eb;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      #sgi-strip-progress-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--sgi-purple), var(--sgi-purple-2));
+        border-radius: 999px;
+        transition: width 200ms ease;
+      }
+
+      /* Results drawer */
+      #sgi-results-drawer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 70px; /* sits above strip */
+        z-index: 999998;
+        display: none;
+      }
+      #sgi-results-panel {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: #fff;
+        border: 1px solid var(--sgi-border);
+        border-radius: 18px;
+        box-shadow: var(--sgi-shadow);
+        overflow: hidden;
+      }
+      #sgi-results-header{
+        padding: 12px 14px;
+        display:flex;
+        align-items:center;
+        justify-content: space-between;
+        gap: 10px;
+        border-bottom: 1px solid #eef2f7;
+        background: linear-gradient(180deg, #ffffff, #fafafa);
+      }
+      #sgi-results-header .left{
+        display:flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      #sgi-results-header .left .h{
+        font-weight: 900;
+        color: var(--sgi-ink);
+        font-size: 14px;
+      }
+      #sgi-results-header .left .s{
+        color: var(--sgi-muted);
+        font-size: 12px;
+      }
+      #sgi-results-close{
+        border: 1px solid var(--sgi-border);
+        background:#fff;
+        border-radius: 12px;
+        padding: 8px 10px;
+        cursor: pointer;
+        font-weight: 900;
+      }
+      #sgi-results-body{
+        padding: 12px 14px;
+        max-height: 48vh;
+        overflow: auto;
+      }
+
+      .sgi-card{
+        border: 1px solid var(--sgi-border);
+        border-radius: 16px;
+        padding: 12px;
+        background:#fff;
+      }
+      .sgi-card + .sgi-card{ margin-top: 10px; }
+
+      .sgi-card-top{
+        display:flex;
+        align-items:flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .sgi-card-title{
+        font-weight: 900;
+        font-size: 14px;
+        color: var(--sgi-ink);
+        line-height: 1.25;
+      }
+      .sgi-card-link{
+        display:inline-block;
+        margin-top: 6px;
+        color: var(--sgi-purple);
+        font-size: 12px;
+        text-decoration: none;
+        word-break: break-all;
+      }
+      .sgi-badge{
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-weight: 900;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .sgi-card-section{
+        margin-top: 10px;
+        color: #374151;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .sgi-muted{
+        color: var(--sgi-muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
     `;
+
+    const style = document.createElement("style");
+    style.id = "sgi-strip-widget-styles";
+    style.textContent = css;
+    document.head.appendChild(style);
   }
 
-  function renderError(stateEl, message) {
-    stateEl.innerHTML = `
-      <div style="padding:12px;border:1px solid #fecaca;border-radius:14px;background:#fff1f2;color:#991b1b;line-height:1.45;">
-        <b>❌ Error</b>
-        <div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(message || "Something went wrong.")}</div>
-      </div>
-    `;
+  function badgeColors(score) {
+    const s = typeof score === "number" ? score : 0;
+    if (s >= 90) return { bg: "#dcfce7", fg: "#166534" };
+    if (s >= 70) return { bg: "#e0f2fe", fg: "#075985" };
+    if (s >= 50) return { bg: "#fef9c3", fg: "#854d0e" };
+    return { bg: "#fee2e2", fg: "#991b1b" };
   }
 
-  // This renderer is the same “cards list” as before.
-  // (If you want the exact “separate page” layout next, we’ll change it after you describe it.)
-  function renderResults(stateEl, items) {
-    const html = items
+  function renderResults(listEl, items) {
+    listEl.innerHTML = (items || [])
       .map((a) => {
         const title = escapeHtml(a.title || "Untitled");
         const url = escapeHtml(a.url || "#");
@@ -89,663 +437,301 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         const reason = escapeHtml(a.relevance_reason || "");
         const score = typeof a.relevance_score === "number" ? a.relevance_score : 0;
 
-        const badgeBg =
-          score >= 90 ? "#dcfce7" : score >= 70 ? "#e0f2fe" : score >= 50 ? "#fef9c3" : "#fee2e2";
-        const badgeText =
-          score >= 90 ? "#166534" : score >= 70 ? "#075985" : score >= 50 ? "#854d0e" : "#991b1b";
+        const { bg, fg } = badgeColors(score);
 
         return `
-          <div style="border:1px solid #e5e7eb;border-radius:16px;padding:12px;background:#fff;">
-            <div style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">
+          <div class="sgi-card">
+            <div class="sgi-card-top">
               <div style="min-width:0;">
-                <div style="font-weight:900;font-size:14px;color:#111827;line-height:1.25;">
-                  ${title}
-                </div>
-                <a href="${url}" target="_blank" rel="noopener noreferrer"
-                   style="display:inline-block;margin-top:7px;color:#4f46e5;font-size:12px;text-decoration:none;word-break:break-all;">
-                  ${url}
-                </a>
+                <div class="sgi-card-title">${title}</div>
+                <a class="sgi-card-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>
               </div>
-              <div style="flex:0 0 auto;">
-                <div style="padding:6px 10px;border-radius:999px;background:${badgeBg};color:${badgeText};font-weight:900;font-size:12px;">
-                  ${score}/100
-                </div>
-              </div>
+              <div class="sgi-badge" style="background:${bg};color:${fg};">${score}/100</div>
             </div>
 
-            ${summary ? `
-              <div style="margin-top:10px;color:#374151;font-size:13px;line-height:1.5;">
-                <b>Summary:</b> ${summary}
-              </div>` : ""}
-
-            ${reason ? `
-              <div style="margin-top:10px;color:#374151;font-size:13px;line-height:1.5;">
-                <b>Why it’s relevant to you:</b> ${reason}
-              </div>` : ""}
+            ${summary ? `<div class="sgi-card-section"><b>Summary:</b> ${summary}</div>` : ""}
+            ${reason ? `<div class="sgi-card-section"><b>Why it’s relevant:</b> ${reason}</div>` : ""}
           </div>
         `;
       })
       .join("");
-
-    stateEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>`;
   }
 
   // -----------------------------
-  // Smooth Progress Controller
-  // -----------------------------
-  function createSmoothProgressController(barFill, barText) {
-    let current = 0;     // current displayed %
-    let target = 0;      // target %
-    let label = "Starting…";
-    let raf = null;
-    let running = false;
-    let lastTs = 0;
-
-    function clamp(n, a, b) {
-      return Math.max(a, Math.min(b, n));
-    }
-
-    function render() {
-      const pct = Math.round(current);
-      barFill.style.width = pct + "%";
-      barText.textContent = `${label} (${pct}%)`;
-    }
-
-    // Smoothly ease current -> target (no jumps)
-    function tick(ts) {
-      if (!running) return;
-      if (!lastTs) lastTs = ts;
-      const dt = Math.min(40, ts - lastTs);
-      lastTs = ts;
-
-      // speed factor: larger gap -> faster movement, then ease-in near target
-      const gap = target - current;
-      const step = clamp(Math.abs(gap) * 0.12, 0.6, 7.5); // px-ish per frame
-      if (Math.abs(gap) < 0.25) {
-        current = target;
-      } else {
-        current += Math.sign(gap) * step * (dt / 16.7);
-      }
-
-      current = clamp(current, 0, 100);
-      render();
-
-      if (current === target && target >= 100) {
-        running = false;
-        return;
-      }
-
-      raf = requestAnimationFrame(tick);
-    }
-
-    function start() {
-      running = true;
-      lastTs = 0;
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(tick);
-    }
-
-    function stop() {
-      running = false;
-      if (raf) cancelAnimationFrame(raf);
-      raf = null;
-    }
-
-    function setProgress(nextTarget, nextLabel) {
-      target = clamp(Number(nextTarget) || 0, 0, 100);
-      if (typeof nextLabel === "string" && nextLabel.trim()) label = nextLabel.trim();
-      if (!running) start();
-    }
-
-    function bumpSlowlyUntil(maxPct, bumpLabel) {
-      // “creep” toward maxPct while waiting (never reaches 100% until done)
-      maxPct = clamp(maxPct, 0, 99);
-      let creepTimer = setInterval(() => {
-        if (target >= maxPct) return;
-        setProgress(Math.min(maxPct, target + 1), bumpLabel || label);
-      }, 650);
-
-      return () => clearInterval(creepTimer);
-    }
-
-    function finish() {
-      setProgress(100, "Done ✅");
-    }
-
-    // init
-    current = 6;
-    target = 6;
-    label = "Starting…";
-    render();
-
-    return { setProgress, bumpSlowlyUntil, finish, stop };
-  }
-
-  // -----------------------------
-  // “Simulated stages” fallback (smooth)
-  // -----------------------------
-  function startSimulatedStages(progressCtrl) {
-    progressCtrl.setProgress(10, "Starting…");
-
-    const stages = [
-      { p: 18, t: "Checking your website…" },
-      { p: 35, t: "Extracting key topics…" },
-      { p: 55, t: "Searching SGI coverage…" },
-      { p: 72, t: "Ranking relevance…" },
-      { p: 88, t: "Writing summaries…" },
-    ];
-
-    let i = 0;
-
-    const stageTimer = setInterval(() => {
-      if (i < stages.length) {
-        progressCtrl.setProgress(stages[i].p, stages[i].t);
-        i++;
-      } else {
-        // once staged, creep to 95%
-        progressCtrl.setProgress(92, "Finalizing…");
-      }
-    }, 900);
-
-    // creep helper
-    const stopCreep = progressCtrl.bumpSlowlyUntil(95, "Finalizing…");
-
-    return () => {
-      clearInterval(stageTimer);
-      stopCreep();
-    };
-  }
-
-  // -----------------------------
-  // Stream reader (stage sync)
-  // Supports:
-  // - text/event-stream (SSE-like "data: {...}\n\n")
-  // - NDJSON lines ("{...}\n{...}\n")
-  // Each message can be:
-  //  { type:"progress", percent: 55, message:"..." }
-  //  { type:"result", data:{ articles:[...] } }
-  //  { type:"error", message:"..." }
-  // -----------------------------
-  async function tryStreamRecommend(payload, onProgress, onResult) {
-    const resp = await fetch(API_RECOMMEND_STREAM, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!resp.ok) {
-      // stream endpoint missing or error -> throw so caller can fallback
-      throw new Error(`Stream endpoint not available (HTTP ${resp.status}).`);
-    }
-
-    const contentType = (resp.headers.get("content-type") || "").toLowerCase();
-    if (!resp.body) throw new Error("Streaming not supported by browser/response.");
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-
-    const emitLine = (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
-      // SSE style: "data: {...}"
-      let jsonStr = trimmed;
-      if (trimmed.startsWith("data:")) jsonStr = trimmed.slice(5).trim();
-
-      // Some SSE servers send "[DONE]" etc
-      if (jsonStr === "[DONE]") return;
-
-      let msg = null;
-      try {
-        msg = JSON.parse(jsonStr);
-      } catch {
-        return; // ignore bad lines
-      }
-
-      if (msg && msg.type === "progress") {
-        const pct = Number(msg.percent);
-        const text = String(msg.message || "Working…");
-        onProgress(pct, text);
-      } else if (msg && msg.type === "result") {
-        onResult(msg.data);
-      } else if (msg && msg.type === "error") {
-        throw new Error(msg.message || "Server error");
-      } else if (msg && msg.articles) {
-        // if server just streams final JSON directly
-        onResult(msg);
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Split by newlines, but keep remainder
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        // SSE event blocks may have empty separators; this works fine
-        emitLine(line);
-      }
-    }
-
-    // Flush remainder
-    if (buffer.trim()) {
-      // Might contain multiple lines without trailing newline
-      buffer.split("\n").forEach(emitLine);
-    }
-
-    // If we got here without result, it's still “ok”; caller can handle
-    return true;
-  }
-
-  // -----------------------------
-  // Widget UI
+  // Create Widget
   // -----------------------------
   function createWidget() {
-    if (document.getElementById("sgi-aiw-root")) return;
+    if (document.getElementById("sgi-strip-root")) return;
 
-    const styleTag = el("style", { id: "sgi-aiw-style" }, `
-      #sgi-aiw-root * { box-sizing: border-box; }
-      #sgi-aiw-pill:hover { transform: translateY(-1px); }
-    `);
-    document.head.appendChild(styleTag);
+    injectStyles();
 
-    // Pill button
-    const pill = el(
-      "button",
-      {
-        id: "sgi-aiw-pill",
-        type: "button",
-        style: {
-          position: "fixed",
-          right: "20px",
-          bottom: "20px",
-          zIndex: 999999,
-          border: "none",
-          borderRadius: "999px",
-          padding: "12px 14px",
-          background: "#111827",
-          color: "#fff",
-          display: "flex",
-          gap: "10px",
-          alignItems: "center",
-          boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
-          cursor: "pointer",
-          fontFamily:
-            "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-          fontSize: "14px",
-          fontWeight: "900",
-          letterSpacing: "0.2px",
-          transition: "transform 120ms ease",
-        },
-      },
-      [
-        el(
-          "span",
-          {
-            style: {
-              width: "28px",
-              height: "28px",
-              borderRadius: "10px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#4f46e5",
-              fontWeight: "900",
-            },
-          },
-          "AI"
-        ),
-        el("span", {}, "Find SGI content"),
-      ]
-    );
+    // Root strip
+    const root = document.createElement("div");
+    root.id = "sgi-strip-root";
 
-    // Panel
-    const panel = el("div", {
-      id: "sgi-aiw-root",
-      style: {
-        position: "fixed",
-        right: "20px",
-        bottom: "76px",
-        width: "440px",
-        maxWidth: "calc(100vw - 40px)",
-        maxHeight: "74vh",
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "18px",
-        boxShadow: "0 18px 60px rgba(0,0,0,0.22)",
-        zIndex: 999999,
-        overflow: "hidden",
-        display: "none",
-        fontFamily:
-          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-      },
-    });
+    const inner = document.createElement("div");
+    inner.id = "sgi-strip-inner";
 
-    // Header
-    const header = el("div", {
-      style: {
-        padding: "14px 14px 12px 14px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        borderBottom: "1px solid #eef2f7",
-        background: "linear-gradient(180deg, #ffffff, #fafafa)",
-      },
-    });
+    // Row 1
+    const row1 = document.createElement("div");
+    row1.id = "sgi-strip-row1";
 
-    const headerLeft = el("div", { style: { display: "flex", gap: "10px", alignItems: "center" } }, [
-      el("div", {
-        style: {
-          width: "36px",
-          height: "36px",
-          borderRadius: "14px",
-          background: "#4f46e5",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#fff",
-          fontWeight: "900",
-        },
-      }, "SGI"),
-      el("div", {}, [
-        el("div", { style: { fontWeight: "900", color: "#111827", fontSize: "14px" } }, "SGI Content Finder"),
-        el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "2px", lineHeight: "1.25" } },
-          "We match SGI articles to your role + your company website."
-        ),
-      ]),
-    ]);
+    const brand = document.createElement("div");
+    brand.id = "sgi-strip-brand";
+    brand.innerHTML = `
+      <div id="sgi-strip-badge">SGI</div>
+      <div id="sgi-strip-title">
+        <div class="h">SGI Content Finder</div>
+        <div class="s">Matches SGI coverage to your role + your site</div>
+      </div>
+    `;
 
-    const closeBtn = el("button", {
-      type: "button",
-      style: {
-        border: "none",
-        background: "#fff",
-        borderRadius: "12px",
-        padding: "8px 10px",
-        cursor: "pointer",
-        color: "#111827",
-        fontWeight: "900",
-        fontSize: "14px",
-      },
-      onclick: () => {
-        panel.style.display = "none";
-        pill.style.display = "flex";
-      },
-    }, "✕");
+    const jobWrap = document.createElement("div");
+    jobWrap.id = "sgi-strip-job-wrap";
+    jobWrap.innerHTML = `
+      <div class="sgi-input-label">Your job title / role</div>
+      <input id="sgi-strip-job" class="sgi-input" type="text" placeholder="e.g. Digital marketing manager" />
+    `;
 
-    header.appendChild(headerLeft);
-    header.appendChild(closeBtn);
+    const siteWrap = document.createElement("div");
+    siteWrap.id = "sgi-strip-site-wrap";
+    siteWrap.innerHTML = `
+      <div class="sgi-input-label">Your company website URL</div>
+      <input id="sgi-strip-site" class="sgi-input" type="text" placeholder="e.g. https://yourcompany.com" />
+    `;
 
-    // Body
-    const body = el("div", {
-      style: {
-        padding: "14px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
+    const btn = document.createElement("button");
+    btn.id = "sgi-strip-btn";
+    btn.type = "button";
+    btn.textContent = "Find SGI content for me";
+
+    const close = document.createElement("button");
+    close.id = "sgi-strip-close";
+    close.type = "button";
+    close.title = "Hide";
+    close.textContent = "✕";
+
+    row1.appendChild(brand);
+    row1.appendChild(jobWrap);
+    row1.appendChild(siteWrap);
+    row1.appendChild(btn);
+    row1.appendChild(close);
+
+    // Row 2 progress
+    const row2 = document.createElement("div");
+    row2.id = "sgi-strip-row2";
+    row2.innerHTML = `
+      <div id="sgi-strip-progress-top">
+        <div id="sgi-strip-progress-text">Starting…</div>
+        <div id="sgi-strip-progress-pct">0%</div>
+      </div>
+      <div id="sgi-strip-progress-track">
+        <div id="sgi-strip-progress-fill"></div>
+      </div>
+      <div class="sgi-muted" style="margin-top:8px;">
+        We only recommend content from <b>sgieurope.com</b>.
+      </div>
+    `;
+
+    inner.appendChild(row1);
+    inner.appendChild(row2);
+    root.appendChild(inner);
+    document.body.appendChild(root);
+
+    // Results drawer (separate from strip)
+    const drawer = document.createElement("div");
+    drawer.id = "sgi-results-drawer";
+    drawer.innerHTML = `
+      <div id="sgi-results-panel">
+        <div id="sgi-results-header">
+          <div class="left">
+            <div class="h">Your SGI matches</div>
+            <div class="s">Top SGI items based on your role and your company site</div>
+          </div>
+          <button id="sgi-results-close" type="button">Close</button>
+        </div>
+        <div id="sgi-results-body">
+          <div class="sgi-card">
+            <div class="sgi-card-title">No results yet</div>
+            <div class="sgi-card-section">Run a search from the bar below.</div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(drawer);
+
+    // Elements
+    const jobInput = document.getElementById("sgi-strip-job");
+    const siteInput = document.getElementById("sgi-strip-site");
+    const progressWrap = row2;
+    const progressText = document.getElementById("sgi-strip-progress-text");
+    const progressPct = document.getElementById("sgi-strip-progress-pct");
+    const progressFill = document.getElementById("sgi-strip-progress-fill");
+    const resultsBody = document.getElementById("sgi-results-body");
+    const resultsClose = document.getElementById("sgi-results-close");
+
+    // Progress animator
+    const animator = createProgressAnimator({
+      onUpdate: (p) => {
+        const pct = Math.round(p);
+        progressFill.style.width = pct + "%";
+        progressPct.textContent = pct + "%";
       },
     });
 
-    const jobLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px" } }, "Your job title / role");
-    const jobHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: Digital marketing manager · Head of retail · Policy advisor");
-    const jobInput = el("input", {
-      id: "sgi-aiw-job",
-      type: "text",
-      placeholder: "e.g. Digital marketing manager",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
-    });
-
-    const siteLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px", marginTop: "6px" } }, "Your company website URL");
-    const siteHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: https://yourcompany.com (we scan this to understand your business)");
-    const siteInput = el("input", {
-      id: "sgi-aiw-site",
-      type: "text",
-      placeholder: "e.g. https://yourcompany.com",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
-    });
-
-    function focusStyle(node) {
-      node.addEventListener("focus", () => {
-        node.style.borderColor = "#c7d2fe";
-        node.style.boxShadow = "0 0 0 4px rgba(79,70,229,0.12)";
-      });
-      node.addEventListener("blur", () => {
-        node.style.borderColor = "#e5e7eb";
-        node.style.boxShadow = "none";
-      });
+    function setLoading(isLoading) {
+      btn.disabled = isLoading;
+      btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
     }
-    focusStyle(jobInput);
-    focusStyle(siteInput);
 
-    // Progress UI
-    const progressWrap = el("div", {
-      id: "sgi-aiw-progress",
-      style: {
-        display: "none",
-        marginTop: "8px",
-        padding: "10px",
-        border: "1px solid #e5e7eb",
-        borderRadius: "14px",
-        background: "#fafafa",
-      },
-    });
+    function showDrawer() {
+      drawer.style.display = "block";
+    }
 
-    const progressText = el("div", {
-      id: "sgi-aiw-progress-text",
-      style: { fontSize: "12px", color: "#374151", fontWeight: "800", marginBottom: "8px" },
-    }, "Starting… (0%)");
+    function hideDrawer() {
+      drawer.style.display = "none";
+    }
 
-    const progressBar = el("div", {
-      style: {
-        height: "10px",
-        width: "100%",
-        background: "#e5e7eb",
-        borderRadius: "999px",
-        overflow: "hidden",
-      },
-    });
+    function setStage(key) {
+      const s = stageByKey(key);
+      progressText.textContent = s.text;
+      animator.setTarget(s.pct);
+    }
 
-    const progressFill = el("div", {
-      id: "sgi-aiw-progress-fill",
-      style: {
-        height: "100%",
-        width: "0%",
-        background: "linear-gradient(90deg, #4f46e5, #7c3aed)",
-        borderRadius: "999px",
-      },
-    });
+    // Simulated stage runner (fallback)
+    function startSimulatedStages() {
+      const sequence = [
+        "starting",
+        "fetching_company_site",
+        "extracting_signals",
+        "collecting_sgi_links",
+        "fetching_sgi_pages",
+        "scoring",
+        "summarizing",
+        "finalizing",
+      ];
+      let idx = 0;
 
-    progressBar.appendChild(progressFill);
-    progressWrap.appendChild(progressText);
-    progressWrap.appendChild(progressBar);
+      setStage(sequence[0]);
 
-    // Actions
-    const actions = el("div", { style: { display: "flex", gap: "10px", alignItems: "center", marginTop: "4px" } });
+      const timer = setInterval(() => {
+        idx = Math.min(idx + 1, sequence.length - 1);
+        setStage(sequence[idx]);
 
-    const goBtn = el("button", {
-      type: "button",
-      id: "sgi-aiw-go",
-      style: {
-        width: "100%",
-        padding: "12px 14px",
-        borderRadius: "14px",
-        border: "none",
-        background: "#4f46e5",
-        color: "#fff",
-        fontWeight: "900",
-        cursor: "pointer",
-        boxShadow: "0 10px 18px rgba(79,70,229,0.25)",
-        fontSize: "13px",
-      },
-    }, "Find SGI content for me");
+        // after finalizing, creep to 97% and wait (never hit 100 until done)
+        if (sequence[idx] === "finalizing") {
+          clearInterval(timer);
+          const creep = setInterval(() => {
+            const cur = animator.getCurrent();
+            if (cur < 97) animator.setTarget(cur + 0.6);
+          }, 900);
+          return () => clearInterval(creep);
+        }
+      }, 900);
 
-    actions.appendChild(goBtn);
+      return () => clearInterval(timer);
+    }
 
-    const smallNote = el("div", { style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" } }, "We only recommend content from SGI Europe (sgieurope.com).");
-
-    // Results
-    const results = el("div", {
-      id: "sgi-aiw-results",
-      style: {
-        marginTop: "2px",
-        paddingTop: "10px",
-        borderTop: "1px solid #eef2f7",
-        overflow: "auto",
-        maxHeight: "40vh",
-      },
-    });
-    renderEmpty(results);
-
-    // Footer
-    const footer = el("div", {
-      style: {
-        padding: "12px 14px",
-        borderTop: "1px solid #eef2f7",
-        background: "#fafafa",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "10px",
-      },
-    });
-
-    const powered = el("div", { style: { fontSize: "12px", color: "#6b7280" } }, "Powered by SGI Recommender");
-    const openSite = el("a", {
-      href: "https://www.sgieurope.com/",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      style: { fontSize: "12px", color: "#4f46e5", textDecoration: "none", fontWeight: "900" },
-    }, "Open SGI ↗");
-
-    footer.appendChild(powered);
-    footer.appendChild(openSite);
-
-    // Assemble
-    body.appendChild(jobLabel);
-    body.appendChild(jobHint);
-    body.appendChild(jobInput);
-    body.appendChild(siteLabel);
-    body.appendChild(siteHint);
-    body.appendChild(siteInput);
-    body.appendChild(actions);
-    body.appendChild(progressWrap);
-    body.appendChild(smallNote);
-    body.appendChild(results);
-
-    panel.appendChild(header);
-    panel.appendChild(body);
-    panel.appendChild(footer);
-
-    document.body.appendChild(pill);
-    document.body.appendChild(panel);
-
-    pill.addEventListener("click", () => {
-      panel.style.display = "block";
-      pill.style.display = "none";
-      jobInput.focus();
-    });
-
+    // Main submit
     async function submit() {
       const job_title = (jobInput.value || "").trim();
       const website_url = normalizeWebsiteUrl(siteInput.value || "");
 
-      if (!job_title || job_title.length < 2) {
-        renderError(results, "Please enter your job title / role.");
-        jobInput.focus();
+      if (!job_title) {
+        progressWrap.style.display = "block";
+        progressText.textContent = "Please enter your job title / role.";
+        animator.setInstant(0);
         return;
       }
 
       if (!website_url || website_url.length < 8) {
-        renderError(results, "Please enter a valid website URL (example: https://yourcompany.com).");
-        siteInput.focus();
+        progressWrap.style.display = "block";
+        progressText.textContent = "Please enter a valid website URL (https://…).";
+        animator.setInstant(0);
         return;
       }
 
-      // Show progress + smooth controller
+      // Show progress + reset
       progressWrap.style.display = "block";
-      const progressCtrl = createSmoothProgressController(progressFill, progressText);
-      progressCtrl.setProgress(8, "Starting…");
+      animator.setInstant(0);
+      progressText.textContent = "Starting…";
+      progressPct.textContent = "0%";
+      progressFill.style.width = "0%";
 
-      // Reset results while loading
-      results.innerHTML = `
-        <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;">
-          ⏳ Working…
+      // Open drawer and show “working…”
+      showDrawer();
+      resultsBody.innerHTML = `
+        <div class="sgi-card">
+          <div class="sgi-card-title">⏳ Working…</div>
+          <div class="sgi-card-section">We’re scanning your website and matching SGI coverage.</div>
         </div>
       `;
 
-      setLoading(goBtn, true);
+      setLoading(true);
 
-      // We will:
-      // 1) Try streaming endpoint for real stage sync
-      // 2) If it fails, fall back to normal endpoint + simulated stages
-      let stopSim = null;
+      // Start fallback stages (used unless backend returns progress info)
+      let stopSim = startSimulatedStages();
 
       try {
-        const payload = { job_title, website_url };
+        // NOTE: This is a normal POST.
+        // If you later add streaming progress (SSE/WebSocket) on the backend,
+        // we can replace this with live updates. For now, we sync to:
+        // - request lifecycle milestones
+        // - optional progress fields in JSON response.
+        const resp = await fetch(`${API_BASE}/recommend`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_title, website_url }),
+        });
 
-        // Try STREAM first (real sync)
-        let finalData = null;
+        // When headers arrive, we’re usually past “fetching SGI pages”
+        // (helps sync to real request progress)
+        animator.setTarget(Math.max(animator.getCurrent(), 72));
+        progressText.textContent = "Processing results…";
 
-        const onProgress = (pct, msg) => {
-          // pct can be missing; if missing, ignore
-          if (Number.isFinite(Number(pct))) {
-            // never show 100 until we actually finish
-            const safe = Math.min(99, Math.max(0, Number(pct)));
-            progressCtrl.setProgress(safe, msg || "Working…");
-          } else if (msg) {
-            // if no % provided, just label and creep
-            progressCtrl.setProgress(Math.min(95, 60), msg);
-          }
-        };
-
-        const onResult = (data) => {
-          finalData = data;
-        };
-
+        let data;
         try {
-          await tryStreamRecommend(payload, onProgress, onResult);
-        } catch (streamErr) {
-          // STREAM not available -> fallback to normal fetch + simulated smooth stages
-          stopSim = startSimulatedStages(progressCtrl);
-
-          const resp = await fetch(API_RECOMMEND, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-
-          let data = null;
-          try {
-            data = await resp.json();
-          } catch {
-            throw new Error(`Server returned invalid JSON (HTTP ${resp.status}).`);
-          }
-
-          if (!resp.ok) {
-            throw new Error(data?.detail || data?.error || `Server error (HTTP ${resp.status}).`);
-          }
-
-          finalData = data;
+          data = await resp.json();
+        } catch {
+          throw new Error(`Server returned invalid JSON (HTTP ${resp.status}).`);
         }
 
-        // stop sim stages if used
-        if (stopSim) stopSim();
+        if (!resp.ok) {
+          throw new Error(data?.detail || data?.error || `Server error (HTTP ${resp.status}).`);
+        }
 
-        // finish progress
-        progressCtrl.finish();
+        if (data?.error) {
+          throw new Error(data.error);
+        }
 
-        const articles = finalData?.articles || [];
+        // If backend included progress meta, sync to it (best-effort)
+        const prog = readBackendProgress(data);
+        if (prog) {
+          // Stop simulation and use backend info
+          if (stopSim) stopSim();
+          stopSim = null;
+
+          if (typeof prog.percent === "number") {
+            progressText.textContent = prog.message || "Working…";
+            animator.setTarget(clamp(prog.percent, 0, 99));
+          } else if (prog.stage) {
+            const s = stageByKey(prog.stage);
+            progressText.textContent = prog.message || s.text;
+            animator.setTarget(clamp(s.pct, 0, 99));
+          }
+        }
+
+        // Render results
+        const articles = data?.articles || [];
         if (!articles.length) {
-          results.innerHTML = `
-            <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-              No strong matches found right now.
-              <div style="margin-top:8px;color:#6b7280;font-size:12px;">
+          if (stopSim) stopSim();
+          progressText.textContent = "Done ✅";
+          animator.setTarget(100);
+
+          resultsBody.innerHTML = `
+            <div class="sgi-card">
+              <div class="sgi-card-title">No strong matches found</div>
+              <div class="sgi-card-section">
                 Try a more specific job title (e.g. “DTC e-commerce manager”, “sports retail buyer”, “trade policy advisor”).
               </div>
             </div>
@@ -753,18 +739,30 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
           return;
         }
 
-        renderResults(results, articles);
+        // Final sync
+        if (stopSim) stopSim();
+        progressText.textContent = "Done ✅";
+        animator.setTarget(100);
+
+        renderResults(resultsBody, articles);
       } catch (e) {
-        console.error("🔥 Widget error:", e);
-        progressText.textContent = "Failed ❌ (0%)";
-        renderError(results, e?.message || "Failed to fetch.");
+        if (stopSim) stopSim();
+        progressText.textContent = "Failed ❌";
+        animator.setTarget(Math.max(animator.getCurrent(), 12));
+
+        resultsBody.innerHTML = `
+          <div class="sgi-card">
+            <div class="sgi-card-title">❌ Error</div>
+            <div class="sgi-card-section" style="white-space:pre-wrap;">${escapeHtml(e?.message || "Failed to fetch.")}</div>
+          </div>
+        `;
       } finally {
-        setLoading(goBtn, false);
+        setLoading(false);
       }
     }
 
-    goBtn.addEventListener("click", submit);
-
+    // Events
+    btn.addEventListener("click", submit);
     jobInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") submit();
     });
@@ -772,10 +770,17 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
       if (ev.key === "Enter") submit();
     });
 
+    close.addEventListener("click", () => {
+      // Hide strip + drawer (you can remove this if you never want it closable)
+      root.style.display = "none";
+      hideDrawer();
+    });
+
+    resultsClose.addEventListener("click", hideDrawer);
+
     window.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape" && panel.style.display !== "none") {
-        panel.style.display = "none";
-        pill.style.display = "flex";
+      if (ev.key === "Escape") {
+        hideDrawer();
       }
     });
   }
