@@ -1,19 +1,20 @@
 /* ============================================================
-   SGI EUROPE - INPUT WIDGET (COPY + PASTE READY)
-   ✅ Collects:
-      1) Job title / role
-      2) Company website URL
-   ✅ Then redirects to: results.html
-   ✅ Results page will call backend and render results there
+   SGI EUROPE - EMBEDDED HERO RECOMMENDER (SGI BRAND STYLE)
+   FULL COPY + PASTE widget.js
+
+   ✅ Embedded hero bar (no floating widget)
+   ✅ Inputs: Website URL + Job title
+   ✅ Button: Find SGI matches
+   ✅ Redirects to results.html (uses sessionStorage)
+   ✅ Calls POST: https://three33-ai.onrender.com/recommend
+       { job_title, website_url }
    ============================================================ */
 
-console.log("✅ SGI Europe Input Widget Loaded");
+console.log("✅ SGI Embedded Recommender (Brand Style) Loaded");
 
 (function () {
-  // If results.html is in the SAME folder as the page, leave this:
-  const RESULTS_PAGE = "results.html";
+  const API_BASE = "https://three33-ai.onrender.com";
 
-  // ---------- Helpers ----------
   function el(tag, attrs = {}, children = []) {
     const node = document.createElement(tag);
     Object.entries(attrs).forEach(([k, v]) => {
@@ -29,295 +30,371 @@ console.log("✅ SGI Europe Input Widget Loaded");
     return node;
   }
 
-  function normalizeWebsiteUrl(raw) {
-    let url = (raw || "").trim();
+  function normalizeUrl(url) {
+    url = (url || "").trim();
     if (!url) return "";
     if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
     return url;
   }
 
-  function createWidget() {
-    if (document.getElementById("sgi-aiw-root")) return;
+  function injectStyles() {
+    if (document.getElementById("sgi-reco-styles")) return;
 
-    // Pill button
-    const pill = el("button", {
-      id: "sgi-aiw-pill",
-      type: "button",
-      style: {
-        position: "fixed",
-        right: "20px",
-        bottom: "20px",
-        zIndex: 999999,
-        border: "none",
-        borderRadius: "999px",
-        padding: "12px 14px",
-        background: "#111827",
-        color: "#fff",
-        display: "flex",
-        gap: "10px",
-        alignItems: "center",
-        boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
-        cursor: "pointer",
-        fontFamily:
-          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-        fontSize: "14px",
-        fontWeight: "900",
-        letterSpacing: "0.2px",
-      },
-    }, [
-      el("span", {
-        style: {
-          width: "28px",
-          height: "28px",
-          borderRadius: "10px",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#4f46e5",
-          fontWeight: "900",
-        },
-      }, "AI"),
-      el("span", {}, "Find SGI content"),
-    ]);
+    const css = `
+      :root{
+        --sgi-navy:#0b1f3b;
+        --sgi-blue:#0d4ea6;
+        --sgi-blue-2:#0b63c9;
+        --sgi-ink:#0f172a;
+        --sgi-text:#334155;
+        --sgi-muted:#64748b;
+        --sgi-border:#e2e8f0;
+        --sgi-bg:#f6f8fb;
+        --sgi-white:#ffffff;
+        --sgi-radius:18px;
+        --sgi-shadow:0 18px 55px rgba(2, 10, 25, 0.12);
+      }
 
-    // Panel
-    const panel = el("div", {
-      id: "sgi-aiw-root",
-      style: {
-        position: "fixed",
-        right: "20px",
-        bottom: "76px",
-        width: "440px",
-        maxWidth: "calc(100vw - 40px)",
-        maxHeight: "74vh",
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "18px",
-        boxShadow: "0 18px 60px rgba(0,0,0,0.22)",
-        zIndex: 999999,
-        overflow: "hidden",
-        display: "none",
-        fontFamily:
-          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-      },
-    });
+      #sgi-embedded-widget {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      }
 
-    // Header
-    const header = el("div", {
-      style: {
-        padding: "14px 14px 12px 14px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        borderBottom: "1px solid #eef2f7",
-        background: "linear-gradient(180deg, #ffffff, #fafafa)",
-      },
-    });
+      /* Make sure it feels native on SGI pages */
+      #sgi-embedded-widget .sgi-wrap{
+        width:100%;
+        padding: 22px 18px;
+        background: linear-gradient(180deg, #ffffff, var(--sgi-bg));
+        border-bottom: 1px solid var(--sgi-border);
+      }
 
-    const headerLeft = el("div", { style: { display: "flex", gap: "10px", alignItems: "center" } }, [
-      el("div", {
-        style: {
-          width: "36px",
-          height: "36px",
-          borderRadius: "14px",
-          background: "#4f46e5",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#fff",
-          fontWeight: "900",
-        },
-      }, "SGI"),
-      el("div", {}, [
-        el("div", { style: { fontWeight: "900", color: "#111827", fontSize: "14px" } }, "SGI Content Finder"),
-        el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "2px", lineHeight: "1.25" } },
-          "Enter your role + website. Results open on a new page."
-        ),
+      #sgi-embedded-widget .sgi-inner{
+        width:100%;
+        max-width: 1180px;
+        margin: 0 auto;
+        display:flex;
+        flex-direction:column;
+        gap: 14px;
+      }
+
+      #sgi-embedded-widget .sgi-toprow{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap: 14px;
+      }
+
+      #sgi-embedded-widget .sgi-brand{
+        display:flex;
+        align-items:center;
+        gap: 12px;
+        min-width: 260px;
+      }
+
+      #sgi-embedded-widget .sgi-mark{
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--sgi-blue), var(--sgi-blue-2));
+        box-shadow: 0 10px 25px rgba(13, 78, 166, 0.25);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:#fff;
+        font-weight:900;
+        letter-spacing: .5px;
+        user-select:none;
+      }
+
+      #sgi-embedded-widget .sgi-title{
+        display:flex;
+        flex-direction:column;
+        line-height:1.1;
+      }
+
+      #sgi-embedded-widget .sgi-title b{
+        font-size: 14px;
+        color: var(--sgi-ink);
+        letter-spacing: .2px;
+      }
+
+      #sgi-embedded-widget .sgi-title span{
+        font-size: 12px;
+        color: var(--sgi-muted);
+        margin-top: 2px;
+      }
+
+      #sgi-embedded-widget .sgi-badge{
+        font-size: 12px;
+        color: #0b1f3b;
+        background: #e9f2ff;
+        border: 1px solid #cfe3ff;
+        padding: 8px 10px;
+        border-radius: 999px;
+        font-weight: 800;
+        white-space:nowrap;
+      }
+
+      #sgi-embedded-widget .sgi-bar{
+        width:100%;
+        display:flex;
+        gap: 12px;
+        align-items:stretch;
+        padding: 10px;
+        border: 1px solid var(--sgi-border);
+        border-radius: 999px;
+        background: var(--sgi-white);
+        box-shadow: 0 12px 30px rgba(2,10,25,0.08);
+      }
+
+      #sgi-embedded-widget .sgi-field{
+        flex: 1;
+        display:flex;
+        align-items:center;
+        gap: 10px;
+        padding: 8px 10px 8px 14px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background: #f8fafc;
+      }
+
+      #sgi-embedded-widget .sgi-icon{
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background: #e9f2ff;
+        color: var(--sgi-blue);
+        font-weight: 900;
+        user-select:none;
+        flex: 0 0 auto;
+      }
+
+      #sgi-embedded-widget input.sgi-input{
+        width: 100%;
+        border: none;
+        outline: none;
+        background: transparent;
+        font-size: 14px;
+        color: var(--sgi-ink);
+        padding: 8px 4px;
+      }
+
+      #sgi-embedded-widget input.sgi-input::placeholder{
+        color: #94a3b8;
+      }
+
+      #sgi-embedded-widget .sgi-field:focus-within{
+        border-color: #c7ddff;
+        box-shadow: 0 0 0 4px rgba(13, 78, 166, 0.12);
+        background: #ffffff;
+      }
+
+      #sgi-embedded-widget button.sgi-btn{
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 12px 18px;
+        border-radius: 999px;
+        background: var(--sgi-blue);
+        color: #fff;
+        font-weight: 900;
+        font-size: 14px;
+        letter-spacing: .2px;
+        box-shadow: 0 14px 28px rgba(13, 78, 166, 0.28);
+        white-space: nowrap;
+        transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+      }
+
+      #sgi-embedded-widget button.sgi-btn:hover{
+        background: #0b57b8;
+        transform: translateY(-1px);
+      }
+
+      #sgi-embedded-widget button.sgi-btn:disabled{
+        opacity: .75;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      #sgi-embedded-widget .sgi-foot{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--sgi-muted);
+      }
+
+      #sgi-embedded-widget .sgi-foot a{
+        color: var(--sgi-blue);
+        text-decoration: none;
+        font-weight: 800;
+      }
+
+      #sgi-embedded-widget .sgi-foot a:hover{
+        text-decoration: underline;
+      }
+
+      /* Responsive: stack fields on small screens */
+      @media (max-width: 720px){
+        #sgi-embedded-widget .sgi-toprow{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+        #sgi-embedded-widget .sgi-brand{
+          min-width: 0;
+        }
+        #sgi-embedded-widget .sgi-bar{
+          flex-direction: column;
+          border-radius: var(--sgi-radius);
+        }
+        #sgi-embedded-widget .sgi-field{
+          border-radius: 14px;
+        }
+        #sgi-embedded-widget button.sgi-btn{
+          width: 100%;
+          border-radius: 14px;
+        }
+      }
+    `;
+
+    const styleTag = el("style", { id: "sgi-reco-styles" }, css);
+    document.head.appendChild(styleTag);
+  }
+
+  function createHeroWidget() {
+    if (document.getElementById("sgi-embedded-widget")) return;
+
+    injectStyles();
+
+    const root = el("div", { id: "sgi-embedded-widget" });
+
+    const wrap = el("div", { className: "sgi-wrap" });
+    const inner = el("div", { className: "sgi-inner" });
+
+    // Top row (brand + badge)
+    const topRow = el("div", { className: "sgi-toprow" });
+
+    const brand = el("div", { className: "sgi-brand" }, [
+      el("div", { className: "sgi-mark" }, "SGI"),
+      el("div", { className: "sgi-title" }, [
+        el("b", {}, "SGI Content Finder"),
+        el("span", {}, "Match SGI coverage to your role + your company site"),
       ]),
     ]);
 
-    const closeBtn = el("button", {
-      type: "button",
-      style: {
-        border: "none",
-        background: "#fff",
-        borderRadius: "12px",
-        padding: "8px 10px",
-        cursor: "pointer",
-        color: "#111827",
-        fontWeight: "900",
-        fontSize: "14px",
-      },
-      onclick: () => {
-        panel.style.display = "none";
-        pill.style.display = "flex";
-      },
-    }, "✕");
+    const badge = el("div", { className: "sgi-badge" }, "SGI Europe • sgieurope.com only");
 
-    header.appendChild(headerLeft);
-    header.appendChild(closeBtn);
+    topRow.appendChild(brand);
+    topRow.appendChild(badge);
 
-    // Body
-    const body = el("div", {
-      style: { padding: "14px", display: "flex", flexDirection: "column", gap: "10px" },
+    // Bar
+    const bar = el("div", { className: "sgi-bar" });
+
+    const websiteField = el("div", { className: "sgi-field" }, [
+      el("div", { className: "sgi-icon", title: "Website" }, "🌐"),
+    ]);
+    const websiteInput = el("input", {
+      className: "sgi-input",
+      type: "text",
+      placeholder: "Your website URL (e.g. https://yourcompany.com)",
+      autocomplete: "url",
+      inputmode: "url",
     });
+    websiteField.appendChild(websiteInput);
 
-    const jobLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px" } }, "Your job title / role");
-    const jobHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: Product manager · Digital marketing manager · Retail buyer");
+    const jobField = el("div", { className: "sgi-field" }, [
+      el("div", { className: "sgi-icon", title: "Job title" }, "💼"),
+    ]);
     const jobInput = el("input", {
+      className: "sgi-input",
       type: "text",
-      placeholder: "e.g. Product manager",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px" },
+      placeholder: "Your job title (e.g. Digital marketing manager)",
+      autocomplete: "organization-title",
     });
+    jobField.appendChild(jobInput);
 
-    const siteLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px", marginTop: "6px" } }, "Your company website URL");
-    const siteHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: https://yourcompany.com");
-    const siteInput = el("input", {
-      type: "text",
-      placeholder: "e.g. https://www.nike.com",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px" },
-    });
+    const button = el("button", { className: "sgi-btn", type: "button" }, "Find my SGI matches");
 
-    function focusStyle(node) {
-      node.addEventListener("focus", () => {
-        node.style.borderColor = "#c7d2fe";
-        node.style.boxShadow = "0 0 0 4px rgba(79,70,229,0.12)";
-      });
-      node.addEventListener("blur", () => {
-        node.style.borderColor = "#e5e7eb";
-        node.style.boxShadow = "none";
-      });
-    }
-    focusStyle(jobInput);
-    focusStyle(siteInput);
+    bar.appendChild(websiteField);
+    bar.appendChild(jobField);
+    bar.appendChild(button);
 
-    const goBtn = el("button", {
-      type: "button",
-      style: {
-        width: "100%",
-        marginTop: "4px",
-        padding: "12px 14px",
-        borderRadius: "14px",
-        border: "none",
-        background: "#4f46e5",
-        color: "#fff",
-        fontWeight: "900",
-        cursor: "pointer",
-        boxShadow: "0 10px 18px rgba(79,70,229,0.25)",
-        fontSize: "13px",
-      },
-    }, "Open results page");
+    // Foot row
+    const foot = el("div", { className: "sgi-foot" }, [
+      el("div", {}, "We scan your site to understand your business, then recommend SGI coverage."),
+      el("a", { href: "https://www.sgieurope.com/", target: "_blank", rel: "noopener noreferrer" }, "Open SGI ↗"),
+    ]);
 
-    const note = el("div", { style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" } },
-      "We only recommend content from SGI Europe (sgieurope.com)."
-    );
+    inner.appendChild(topRow);
+    inner.appendChild(bar);
+    inner.appendChild(foot);
 
-    const errorBox = el("div", {
-      style: {
-        display: "none",
-        padding: "10px",
-        borderRadius: "14px",
-        border: "1px solid #fecaca",
-        background: "#fff1f2",
-        color: "#991b1b",
-        fontSize: "12px",
-        lineHeight: "1.4",
-        whiteSpace: "pre-wrap",
-      },
-    });
+    wrap.appendChild(inner);
+    root.appendChild(wrap);
 
-    function showError(msg) {
-      errorBox.style.display = "block";
-      errorBox.textContent = msg;
-    }
-    function hideError() {
-      errorBox.style.display = "none";
-      errorBox.textContent = "";
-    }
+    // Insert at top of page
+    document.body.insertBefore(root, document.body.firstChild);
 
     async function submit() {
-      hideError();
+      const website_url = normalizeUrl(websiteInput.value);
       const job_title = (jobInput.value || "").trim();
-      const website_url = normalizeWebsiteUrl(siteInput.value || "");
 
+      if (!website_url) {
+        alert("Please enter your website URL.");
+        websiteInput.focus();
+        return;
+      }
       if (!job_title || job_title.length < 2) {
-        showError("Please enter your job title / role.");
+        alert("Please enter your job title.");
         jobInput.focus();
         return;
       }
 
-      if (!website_url || website_url.length < 8) {
-        showError("Please enter a valid website URL (example: https://yourcompany.com).");
-        siteInput.focus();
-        return;
+      button.disabled = true;
+      const oldText = button.textContent;
+      button.textContent = "Matching SGI content…";
+
+      try {
+        // Optional: quick pre-flight ping to catch obvious errors
+        // (We still redirect regardless on success.)
+        const resp = await fetch(`${API_BASE}/recommend`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_title, website_url }),
+        });
+
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok) {
+          const msg = data?.detail || data?.error || `Server error (HTTP ${resp.status})`;
+          throw new Error(msg);
+        }
+
+        // Store inputs for results page (and optionally store results too)
+        sessionStorage.setItem("sgi_reco_job_title", job_title);
+        sessionStorage.setItem("sgi_reco_website_url", website_url);
+
+        // If you want results page to avoid re-calling backend, store the response:
+        sessionStorage.setItem("sgi_reco_results", JSON.stringify(data || {}));
+
+        window.location.href = "results.html";
+      } catch (e) {
+        alert("Error: " + (e?.message || "Failed to fetch."));
+        button.disabled = false;
+        button.textContent = oldText;
       }
-
-      // Store data for the results page
-      sessionStorage.setItem("sgi_reco_job_title", job_title);
-      sessionStorage.setItem("sgi_reco_website_url", website_url);
-
-      // Redirect
-      window.location.href = RESULTS_PAGE;
     }
 
-    goBtn.addEventListener("click", submit);
-    jobInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
-    siteInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
-
-    // Footer
-    const footer = el("div", {
-      style: {
-        padding: "12px 14px",
-        borderTop: "1px solid #eef2f7",
-        background: "#fafafa",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "10px",
-      },
-    });
-    footer.appendChild(el("div", { style: { fontSize: "12px", color: "#6b7280" } }, "Powered by SGI Recommender"));
-    footer.appendChild(el("a", {
-      href: "https://www.sgieurope.com/",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      style: { fontSize: "12px", color: "#4f46e5", textDecoration: "none", fontWeight: "900" },
-    }, "Open SGI ↗"));
-
-    body.appendChild(jobLabel);
-    body.appendChild(jobHint);
-    body.appendChild(jobInput);
-    body.appendChild(siteLabel);
-    body.appendChild(siteHint);
-    body.appendChild(siteInput);
-    body.appendChild(goBtn);
-    body.appendChild(note);
-    body.appendChild(errorBox);
-
-    panel.appendChild(header);
-    panel.appendChild(body);
-    panel.appendChild(footer);
-
-    document.body.appendChild(pill);
-    document.body.appendChild(panel);
-
-    pill.addEventListener("click", () => {
-      panel.style.display = "block";
-      pill.style.display = "none";
-      jobInput.focus();
-    });
-
-    window.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape" && panel.style.display !== "none") {
-        panel.style.display = "none";
-        pill.style.display = "flex";
-      }
-    });
+    button.addEventListener("click", submit);
+    websiteInput.addEventListener("keydown", (ev) => ev.key === "Enter" && submit());
+    jobInput.addEventListener("keydown", (ev) => ev.key === "Enter" && submit());
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", createWidget);
+    document.addEventListener("DOMContentLoaded", createHeroWidget);
   } else {
-    createWidget();
+    createHeroWidget();
   }
 })();
