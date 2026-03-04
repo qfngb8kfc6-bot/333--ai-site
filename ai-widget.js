@@ -1,20 +1,31 @@
 /* ============================================================
-   SGI EUROPE - Bottom Strip Widget (COPY + PASTE READY)
-   ✅ Bottom strip (full width) like your screenshot
-   ✅ Keeps fields: job title + company website URL
-   ✅ Real backend progress events (SSE over fetch streaming)
-   ✅ Smooth % animation (no jumping)
-   ✅ Uses:
-      POST /recommend_stream
-      body: { "job_title": "...", "website_url": "https://..." }
+   SGI EUROPE - Bottom Strip Widget (LATEST FEATURES + NEW DESIGN)
+   COPY + PASTE READY (THIS IS THE WHOLE widget.js)
+
+   ✅ Bottom strip (full-width) design (like your screenshot)
+   ✅ Inputs stay the same:
+      1) Job title / role
+      2) Company website URL
+   ✅ Keeps ALL latest progress features:
+      - Real backend progress events (NOT fake)
+      - Smooth % animation (no jumping)
+      - Progress message + percent shown in the bar
+   ✅ Shows results under the bar (no floating panel / no old design)
+
+   Backend endpoints expected:
+     POST  /recommend_stream   (SSE stream: progress + result + error)
+   If you ONLY have /recommend (non-stream), tell me and I’ll swap it.
+
    ============================================================ */
 
-console.log("✅ SGI Bottom Strip Widget Loaded");
+console.log("✅ SGI Bottom Strip Widget (Latest) Loaded");
 
 (function () {
   const API_BASE = "https://three33-ai.onrender.com";
 
-  // ---------- Helpers ----------
+  // -------------------------
+  // Utilities
+  // -------------------------
   function el(tag, attrs = {}, children = []) {
     const node = document.createElement(tag);
     Object.entries(attrs).forEach(([k, v]) => {
@@ -47,55 +58,75 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
   }
 
   function clamp(n, a, b) {
+    n = Number(n);
+    if (Number.isNaN(n)) n = 0;
     return Math.max(a, Math.min(b, n));
   }
 
-  // ---------- Smooth progress animator ----------
-  function makeProgressAnimator(progressFill, progressLabelLeft, progressLabelRight) {
+  // -------------------------
+  // Smooth progress animator (no jumping)
+  // -------------------------
+  function makeSmoothProgress(progressFill, labelLeft, labelRight) {
     let current = 0;
     let target = 0;
-    let msg = "Starting…";
+    let message = "Starting…";
     let raf = null;
 
     function tick() {
       const diff = target - current;
       current = current + diff * 0.12; // easing
-      if (Math.abs(diff) < 0.2) current = target;
+      if (Math.abs(diff) < 0.15) current = target;
 
       const pct = clamp(current, 0, 100);
       progressFill.style.width = pct.toFixed(0) + "%";
-      progressLabelLeft.textContent = msg;
-      progressLabelRight.textContent = pct.toFixed(0) + "%";
+      labelLeft.textContent = message;
+      labelRight.textContent = pct.toFixed(0) + "%";
 
       if (current !== target) raf = requestAnimationFrame(tick);
       else raf = null;
     }
 
     return {
-      set(p, text) {
-        target = clamp(Number(p) || 0, 0, 100);
-        msg = text || msg;
-        if (!raf) raf = requestAnimationFrame(tick);
-      },
       reset() {
         current = 0;
         target = 0;
-        msg = "Starting…";
+        message = "Starting…";
         progressFill.style.width = "0%";
-        progressLabelLeft.textContent = "Starting…";
-        progressLabelRight.textContent = "0%";
+        labelLeft.textContent = "Starting…";
+        labelRight.textContent = "0%";
         if (raf) cancelAnimationFrame(raf);
         raf = null;
       },
-      done(text) {
+      set(pct, msg) {
+        target = clamp(pct, 0, 100);
+        if (msg) message = msg;
+        if (!raf) raf = requestAnimationFrame(tick);
+      },
+      done(msg) {
         target = 100;
-        msg = text || "Done ✅";
+        message = msg || "Done ✅";
+        if (!raf) raf = requestAnimationFrame(tick);
+      },
+      fail(msg) {
+        target = clamp(current, 0, 100);
+        message = msg || "Failed ❌";
         if (!raf) raf = requestAnimationFrame(tick);
       },
     };
   }
 
-  // ---------- SSE over fetch streaming (POST) ----------
+  // -------------------------
+  // SSE via fetch streaming (POST)
+  // Server should emit frames like:
+  //   event: progress
+  //   data: {"percent":35,"message":"Extracting key topics..."}
+  //
+  //   event: result
+  //   data: {"articles":[...], "error": null}
+  //
+  //   event: error
+  //   data: {"detail":"..."}
+  // -------------------------
   async function postSSE(url, body, onEvent) {
     const resp = await fetch(url, {
       method: "POST",
@@ -118,9 +149,6 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
     const decoder = new TextDecoder("utf-8");
 
     let buffer = "";
-    let eventName = "message";
-    let dataLines = [];
-
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -129,44 +157,46 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
 
       let idx;
       while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        const rawFrame = buffer.slice(0, idx);
+        const raw = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
 
-        const lines = rawFrame.split("\n").map((l) => l.replace(/\r$/, ""));
-        eventName = "message";
-        dataLines = [];
+        let eventName = "message";
+        const dataLines = [];
 
-        for (const line of lines) {
+        raw.split("\n").forEach((line) => {
+          line = line.replace(/\r$/, "");
           if (line.startsWith("event:")) eventName = line.slice(6).trim();
           if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-        }
+        });
 
-        if (dataLines.length) {
-          const dataStr = dataLines.join("\n");
-          let payload = dataStr;
-          try {
-            payload = JSON.parse(dataStr);
-          } catch {}
-          onEvent(eventName, payload);
-        }
+        if (!dataLines.length) continue;
+
+        const dataStr = dataLines.join("\n");
+        let payload = dataStr;
+        try {
+          payload = JSON.parse(dataStr);
+        } catch {}
+        onEvent(eventName, payload);
       }
     }
   }
 
-  // ---------- Results rendering ----------
+  // -------------------------
+  // Results UI
+  // -------------------------
+  function renderEmpty(resultsEl) {
+    resultsEl.innerHTML = `
+      <div style="padding:12px;border:1px dashed #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
+        Enter your <b>role</b> and <b>website</b>, then click <b>Find SGI content for me</b>.
+      </div>
+    `;
+  }
+
   function renderError(resultsEl, message) {
     resultsEl.innerHTML = `
       <div style="padding:12px;border:1px solid #fecaca;border-radius:14px;background:#fff1f2;color:#991b1b;line-height:1.45;">
         <b>❌ Error</b>
         <div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(message || "Something went wrong.")}</div>
-      </div>
-    `;
-  }
-
-  function renderEmpty(resultsEl) {
-    resultsEl.innerHTML = `
-      <div style="padding:12px;border:1px dashed #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-        Enter your <b>role</b> and <b>website</b>, then click <b>Find SGI content for me</b>.
       </div>
     `;
   }
@@ -218,19 +248,16 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       })
       .join("");
 
-    resultsEl.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        ${html || ""}
-      </div>
-    `;
+    resultsEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>`;
   }
 
-  // ---------- Bottom strip widget ----------
+  // -------------------------
+  // Create bottom strip widget (FULL WIDTH)
+  // -------------------------
   function createWidget() {
-    // Prevent double-inject
     if (document.getElementById("sgi-strip-root")) return;
 
-    // Styles
+    // Inject CSS once
     const styleTag = el("style", { id: "sgi-strip-style" }, `
       #sgi-strip-root, #sgi-strip-root * { box-sizing: border-box; }
       #sgi-strip-root input::placeholder { color: #9ca3af; }
@@ -239,15 +266,15 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
         border-color: #c7d2fe !important;
         box-shadow: 0 0 0 4px rgba(79,70,229,0.12) !important;
       }
-      @media (max-width: 900px) {
-        #sgi-strip-bar { padding: 10px 10px !important; }
+      @media (max-width: 960px) {
         #sgi-strip-grid { grid-template-columns: 1fr !important; }
         #sgi-strip-actions { grid-template-columns: 1fr !important; }
+        #sgi-strip-go { margin-top: 8px !important; }
       }
     `);
     document.head.appendChild(styleTag);
 
-    // Root container pinned to bottom
+    // Root fixed bottom
     const root = el("div", {
       id: "sgi-strip-root",
       style: {
@@ -261,7 +288,7 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       },
     });
 
-    // Top mini header (like your screenshot: "Your SGI matches" + Close)
+    // Top title row ("Your SGI matches" + Close)
     const topRow = el("div", {
       style: {
         background: "rgba(255,255,255,0.92)",
@@ -287,7 +314,7 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       ),
     ]);
 
-    const closeAllBtn = el("button", {
+    const closeBtn = el("button", {
       type: "button",
       style: {
         border: "1px solid #e5e7eb",
@@ -297,17 +324,14 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
         fontWeight: "800",
         cursor: "pointer",
       },
-      onclick: () => {
-        root.remove();
-      },
+      onclick: () => root.remove(),
     }, "Close");
 
     topRow.appendChild(topLeft);
-    topRow.appendChild(closeAllBtn);
+    topRow.appendChild(closeBtn);
 
-    // Main strip bar (fields + button + X)
+    // Main bar
     const bar = el("div", {
-      id: "sgi-strip-bar",
       style: {
         background: "rgba(255,255,255,0.95)",
         backdropFilter: "blur(10px)",
@@ -320,17 +344,17 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       },
     });
 
+    // Grid row (logo + job + website/button + X)
     const grid = el("div", {
       id: "sgi-strip-grid",
       style: {
         display: "grid",
-        gridTemplateColumns: "260px 1fr 240px 44px",
+        gridTemplateColumns: "260px 1fr 1.25fr 44px",
         gap: "12px",
         alignItems: "center",
       },
     });
 
-    // Brand block (left)
     const brand = el("div", { style: { display: "flex", gap: "10px", alignItems: "center" } }, [
       el("div", {
         style: {
@@ -353,7 +377,6 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       ]),
     ]);
 
-    // Job field
     const jobWrap = el("div", {}, [
       el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900", marginBottom: "6px" } }, "Your job title / role"),
       el("input", {
@@ -373,8 +396,15 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       }),
     ]);
 
-    // Website field + button (together like screenshot)
-    const siteActions = el("div", { style: { display: "grid", gridTemplateColumns: "1fr 240px", gap: "12px", alignItems: "end" }, id: "sgi-strip-actions" });
+    const siteActions = el("div", {
+      id: "sgi-strip-actions",
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 240px",
+        gap: "12px",
+        alignItems: "end",
+      },
+    });
 
     const siteWrap = el("div", {}, [
       el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900", marginBottom: "6px" } }, "Your company website URL"),
@@ -416,9 +446,9 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
     siteActions.appendChild(siteWrap);
     siteActions.appendChild(goBtn);
 
-    // Small X button (like your screenshot on right)
     const xBtn = el("button", {
       type: "button",
+      title: "Close",
       style: {
         width: "44px",
         height: "44px",
@@ -430,7 +460,6 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
         fontSize: "16px",
       },
       onclick: () => root.remove(),
-      title: "Close",
     }, "×");
 
     grid.appendChild(brand);
@@ -438,8 +467,9 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
     grid.appendChild(siteActions);
     grid.appendChild(xBtn);
 
-    // Progress row (full width under inputs) — matches your screenshot
+    // Progress area (full-width)
     const progressCard = el("div", {
+      id: "sgi-strip-progress-card",
       style: {
         marginTop: "12px",
         border: "1px solid #e5e7eb",
@@ -448,7 +478,6 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
         padding: "10px 12px",
         display: "none",
       },
-      id: "sgi-strip-progress-card",
     });
 
     const progressTop = el("div", {
@@ -461,8 +490,15 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       },
     });
 
-    const progressLeft = el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900" }, id: "sgi-strip-progress-left" }, "Starting…");
-    const progressRight = el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900" }, id: "sgi-strip-progress-right" }, "0%");
+    const progressLeft = el("div", {
+      id: "sgi-strip-progress-left",
+      style: { fontSize: "12px", color: "#111827", fontWeight: "900" },
+    }, "Starting…");
+
+    const progressRight = el("div", {
+      id: "sgi-strip-progress-right",
+      style: { fontSize: "12px", color: "#111827", fontWeight: "900" },
+    }, "0%");
 
     progressTop.appendChild(progressLeft);
     progressTop.appendChild(progressRight);
@@ -478,6 +514,7 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
     });
 
     const progressFill = el("div", {
+      id: "sgi-strip-progress-fill",
       style: {
         height: "100%",
         width: "0%",
@@ -485,21 +522,18 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
         borderRadius: "999px",
         transition: "width 160ms linear",
       },
-      id: "sgi-strip-progress-fill",
     });
 
     progressBar.appendChild(progressFill);
 
-    const smallNote = el("div", {
-      style: { marginTop: "8px", fontSize: "12px", color: "#6b7280" },
-    }, 'We only recommend content from <b>sgieurope.com</b>.');
-    smallNote.innerHTML = 'We only recommend content from <b>sgieurope.com</b>.';
+    const note = el("div", { style: { marginTop: "8px", fontSize: "12px", color: "#6b7280" } });
+    note.innerHTML = `We only recommend content from <b>sgieurope.com</b>.`;
 
     progressCard.appendChild(progressTop);
     progressCard.appendChild(progressBar);
-    progressCard.appendChild(smallNote);
+    progressCard.appendChild(note);
 
-    // Results area (in bar under progress)
+    // Results area
     const results = el("div", {
       id: "sgi-strip-results",
       style: {
@@ -513,7 +547,7 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
     });
     renderEmpty(results);
 
-    // Assemble bar
+    // Assemble
     bar.appendChild(grid);
     bar.appendChild(progressCard);
     bar.appendChild(results);
@@ -522,8 +556,8 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
     root.appendChild(bar);
     document.body.appendChild(root);
 
-    // animator
-    const animator = makeProgressAnimator(progressFill, progressLeft, progressRight);
+    // Progress animator
+    const smooth = makeSmoothProgress(progressFill, progressLeft, progressRight);
 
     // Loading state
     function setLoading(isLoading) {
@@ -533,30 +567,33 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       goBtn.textContent = isLoading ? "Working…" : "Find SGI content for me";
     }
 
+    // Submit (REAL backend progress events)
     async function submit() {
       const job_title = (document.getElementById("sgi-strip-job")?.value || "").trim();
       const website_url = normalizeWebsiteUrl(document.getElementById("sgi-strip-site")?.value || "");
 
-      // show containers
       progressCard.style.display = "block";
       results.style.display = "block";
 
       if (!job_title || job_title.length < 2) {
-        animator.set(0, "Enter your job title…");
+        smooth.reset();
+        smooth.set(0, "Enter your job title…");
         renderError(results, "Please enter your job title / role.");
         document.getElementById("sgi-strip-job")?.focus();
         return;
       }
+
       if (!website_url || website_url.length < 8) {
-        animator.set(0, "Enter a valid website URL…");
+        smooth.reset();
+        smooth.set(0, "Enter a valid website URL…");
         renderError(results, "Please enter a valid website URL (example: https://yourcompany.com).");
         document.getElementById("sgi-strip-site")?.focus();
         return;
       }
 
       setLoading(true);
-      animator.reset();
-      animator.set(1, "Starting…");
+      smooth.reset();
+      smooth.set(2, "Starting…");
 
       results.innerHTML = `
         <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;">
@@ -567,18 +604,18 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
       try {
         await postSSE(`${API_BASE}/recommend_stream`, { job_title, website_url }, (event, payload) => {
           if (event === "progress") {
-            const p = payload?.percent ?? 0;
+            const pct = payload?.percent ?? 0;
             const msg = payload?.message ?? "Working…";
-            animator.set(p, msg);
+            smooth.set(pct, msg);
           }
 
           if (event === "error") {
-            animator.set(100, "Failed");
-            renderError(results, payload?.detail || "Failed to fetch.");
+            smooth.fail("Failed ❌");
+            renderError(results, payload?.detail || payload?.error || "Failed to fetch.");
           }
 
           if (event === "result") {
-            animator.done("Done ✅");
+            smooth.done("Done ✅");
 
             const articles = payload?.articles || [];
             if (!articles.length) {
@@ -597,21 +634,25 @@ console.log("✅ SGI Bottom Strip Widget Loaded");
           }
         });
       } catch (e) {
-        animator.set(100, "Failed");
+        smooth.fail("Failed ❌");
         renderError(results, e?.message || "Failed to fetch.");
       } finally {
         setLoading(false);
       }
     }
 
+    // Events
     goBtn.addEventListener("click", submit);
 
-    // Enter submits
     document.getElementById("sgi-strip-job").addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") submit();
     });
     document.getElementById("sgi-strip-site").addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") submit();
+    });
+
+    window.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") root.remove();
     });
   }
 
