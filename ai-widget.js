@@ -1,13 +1,15 @@
 /* ============================================================
-   SGI EUROPE - Visitor Recommender Widget (COPY + PASTE READY)
-   ✅ Real backend progress events (SSE via fetch streaming)
-   ✅ Smooth percentage animation (no jumping)
+   SGI EUROPE - Bottom Strip Widget (COPY + PASTE READY)
+   ✅ Bottom strip (full width) like your screenshot
+   ✅ Keeps fields: job title + company website URL
+   ✅ Real backend progress events (SSE over fetch streaming)
+   ✅ Smooth % animation (no jumping)
    ✅ Uses:
       POST /recommend_stream
       body: { "job_title": "...", "website_url": "https://..." }
    ============================================================ */
 
-console.log("✅ SGI Europe Recommender Widget Loaded");
+console.log("✅ SGI Bottom Strip Widget Loaded");
 
 (function () {
   const API_BASE = "https://three33-ai.onrender.com";
@@ -44,26 +46,116 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     return url;
   }
 
-  function setLoading(btn, isLoading) {
-    btn.disabled = isLoading;
-    btn.style.opacity = isLoading ? "0.78" : "1";
-    btn.style.cursor = isLoading ? "not-allowed" : "pointer";
-    btn.textContent = isLoading ? "Working…" : "Find SGI content for me";
+  function clamp(n, a, b) {
+    return Math.max(a, Math.min(b, n));
   }
 
-  function renderEmpty(stateEl) {
-    stateEl.innerHTML = `
-      <div style="padding:12px;border:1px dashed #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
-        Enter your <b>role</b> and <b>website</b>, then click <b>Find SGI content for me</b>.
-        <div style="margin-top:8px;color:#6b7280;font-size:12px;">
-          We only recommend content from <b>sgieurope.com</b>.
-        </div>
-      </div>
-    `;
+  // ---------- Smooth progress animator ----------
+  function makeProgressAnimator(progressFill, progressLabelLeft, progressLabelRight) {
+    let current = 0;
+    let target = 0;
+    let msg = "Starting…";
+    let raf = null;
+
+    function tick() {
+      const diff = target - current;
+      current = current + diff * 0.12; // easing
+      if (Math.abs(diff) < 0.2) current = target;
+
+      const pct = clamp(current, 0, 100);
+      progressFill.style.width = pct.toFixed(0) + "%";
+      progressLabelLeft.textContent = msg;
+      progressLabelRight.textContent = pct.toFixed(0) + "%";
+
+      if (current !== target) raf = requestAnimationFrame(tick);
+      else raf = null;
+    }
+
+    return {
+      set(p, text) {
+        target = clamp(Number(p) || 0, 0, 100);
+        msg = text || msg;
+        if (!raf) raf = requestAnimationFrame(tick);
+      },
+      reset() {
+        current = 0;
+        target = 0;
+        msg = "Starting…";
+        progressFill.style.width = "0%";
+        progressLabelLeft.textContent = "Starting…";
+        progressLabelRight.textContent = "0%";
+        if (raf) cancelAnimationFrame(raf);
+        raf = null;
+      },
+      done(text) {
+        target = 100;
+        msg = text || "Done ✅";
+        if (!raf) raf = requestAnimationFrame(tick);
+      },
+    };
   }
 
-  function renderError(stateEl, message) {
-    stateEl.innerHTML = `
+  // ---------- SSE over fetch streaming (POST) ----------
+  async function postSSE(url, body, onEvent) {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      let msg = `Server error (HTTP ${resp.status})`;
+      try {
+        const j = await resp.json();
+        msg = j?.detail || j?.error || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    if (!resp.body) throw new Error("Streaming not supported by this browser.");
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    let buffer = "";
+    let eventName = "message";
+    let dataLines = [];
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const rawFrame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+
+        const lines = rawFrame.split("\n").map((l) => l.replace(/\r$/, ""));
+        eventName = "message";
+        dataLines = [];
+
+        for (const line of lines) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+
+        if (dataLines.length) {
+          const dataStr = dataLines.join("\n");
+          let payload = dataStr;
+          try {
+            payload = JSON.parse(dataStr);
+          } catch {}
+          onEvent(eventName, payload);
+        }
+      }
+    }
+  }
+
+  // ---------- Results rendering ----------
+  function renderError(resultsEl, message) {
+    resultsEl.innerHTML = `
       <div style="padding:12px;border:1px solid #fecaca;border-radius:14px;background:#fff1f2;color:#991b1b;line-height:1.45;">
         <b>❌ Error</b>
         <div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(message || "Something went wrong.")}</div>
@@ -71,8 +163,16 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     `;
   }
 
-  function renderResults(stateEl, items) {
-    const html = items
+  function renderEmpty(resultsEl) {
+    resultsEl.innerHTML = `
+      <div style="padding:12px;border:1px dashed #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;line-height:1.45;">
+        Enter your <b>role</b> and <b>website</b>, then click <b>Find SGI content for me</b>.
+      </div>
+    `;
+  }
+
+  function renderResults(resultsEl, items) {
+    const html = (items || [])
       .map((a) => {
         const title = escapeHtml(a.title || "Untitled");
         const url = escapeHtml(a.url || "#");
@@ -118,312 +218,254 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
       })
       .join("");
 
-    stateEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>`;
+    resultsEl.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${html || ""}
+      </div>
+    `;
   }
 
-  // ---------- Smooth progress animator ----------
-  function makeProgressAnimator(progressFill, progressText) {
-    let current = 0;
-    let target = 0;
-    let lastMsg = "Starting…";
-    let raf = null;
-
-    function tick() {
-      // smooth easing toward target
-      const diff = target - current;
-      current = current + diff * 0.12; // easing factor
-
-      // snap near target
-      if (Math.abs(diff) < 0.2) current = target;
-
-      const pct = Math.max(0, Math.min(100, current));
-      progressFill.style.width = pct.toFixed(0) + "%";
-      progressText.textContent = `${lastMsg} (${pct.toFixed(0)}%)`;
-
-      if (current !== target) {
-        raf = requestAnimationFrame(tick);
-      } else {
-        raf = null;
-      }
-    }
-
-    return {
-      set(p, msg) {
-        target = Math.max(0, Math.min(100, Number(p) || 0));
-        lastMsg = msg || lastMsg || "Working…";
-        if (!raf) raf = requestAnimationFrame(tick);
-      },
-      done(msg) {
-        target = 100;
-        lastMsg = msg || "Done ✅";
-        if (!raf) raf = requestAnimationFrame(tick);
-      },
-      reset() {
-        current = 0;
-        target = 0;
-        lastMsg = "Starting…";
-        progressFill.style.width = "0%";
-        progressText.textContent = "Starting… (0%)";
-        if (raf) cancelAnimationFrame(raf);
-        raf = null;
-      },
-    };
-  }
-
-  // ---------- Stream parser (SSE over fetch POST) ----------
-  async function postSSE(url, body, onEvent) {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      let msg = `Server error (HTTP ${resp.status})`;
-      try {
-        const j = await resp.json();
-        msg = j?.detail || j?.error || msg;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    if (!resp.body) {
-      throw new Error("Streaming not supported by this browser.");
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-
-    let buffer = "";
-    let eventName = "message";
-    let dataLines = [];
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // process by SSE frame separator
-      let idx;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        const rawFrame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-
-        const lines = rawFrame.split("\n").map((l) => l.replace(/\r$/, ""));
-
-        eventName = "message";
-        dataLines = [];
-
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            eventName = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            dataLines.push(line.slice(5).trim());
-          } else {
-            // ignore comments / keep-alives
-          }
-        }
-
-        if (dataLines.length) {
-          const dataStr = dataLines.join("\n");
-          let payload = dataStr;
-          try {
-            payload = JSON.parse(dataStr);
-          } catch {}
-          onEvent(eventName, payload);
-        }
-      }
-    }
-  }
-
-  // ---------- Widget UI ----------
+  // ---------- Bottom strip widget ----------
   function createWidget() {
-    if (document.getElementById("sgi-aiw-root")) return;
+    // Prevent double-inject
+    if (document.getElementById("sgi-strip-root")) return;
 
-    // small global style
-    const styleTag = el("style", { id: "sgi-aiw-style" }, `
-      #sgi-aiw-root * { box-sizing: border-box; }
-      #sgi-aiw-pill:hover { transform: translateY(-1px); }
+    // Styles
+    const styleTag = el("style", { id: "sgi-strip-style" }, `
+      #sgi-strip-root, #sgi-strip-root * { box-sizing: border-box; }
+      #sgi-strip-root input::placeholder { color: #9ca3af; }
+      #sgi-strip-root .sgi-focus:focus {
+        outline: none;
+        border-color: #c7d2fe !important;
+        box-shadow: 0 0 0 4px rgba(79,70,229,0.12) !important;
+      }
+      @media (max-width: 900px) {
+        #sgi-strip-bar { padding: 10px 10px !important; }
+        #sgi-strip-grid { grid-template-columns: 1fr !important; }
+        #sgi-strip-actions { grid-template-columns: 1fr !important; }
+      }
     `);
     document.head.appendChild(styleTag);
 
-    // Pill button
-    const pill = el(
-      "button",
-      {
-        id: "sgi-aiw-pill",
-        type: "button",
-        style: {
-          position: "fixed",
-          right: "20px",
-          bottom: "20px",
-          zIndex: 999999,
-          border: "none",
-          borderRadius: "999px",
-          padding: "12px 14px",
-          background: "#111827",
-          color: "#fff",
-          display: "flex",
-          gap: "10px",
-          alignItems: "center",
-          boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
-          cursor: "pointer",
-          fontFamily:
-            "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-          fontSize: "14px",
-          fontWeight: "900",
-          letterSpacing: "0.2px",
-          transition: "transform 120ms ease",
-        },
-      },
-      [
-        el("span", {
-          style: {
-            width: "28px",
-            height: "28px",
-            borderRadius: "10px",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#4f46e5",
-            fontWeight: "900",
-          },
-        }, "SGI"),
-        el("span", {}, "Find SGI content"),
-      ]
-    );
-
-    // Panel
-    const panel = el("div", {
-      id: "sgi-aiw-root",
+    // Root container pinned to bottom
+    const root = el("div", {
+      id: "sgi-strip-root",
       style: {
         position: "fixed",
-        right: "20px",
-        bottom: "76px",
-        width: "440px",
-        maxWidth: "calc(100vw - 40px)",
-        maxHeight: "74vh",
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "18px",
-        boxShadow: "0 18px 60px rgba(0,0,0,0.22)",
+        left: "0",
+        right: "0",
+        bottom: "0",
         zIndex: 999999,
-        overflow: "hidden",
-        display: "none",
         fontFamily:
           "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
       },
     });
 
-    // Header
-    const header = el("div", {
+    // Top mini header (like your screenshot: "Your SGI matches" + Close)
+    const topRow = el("div", {
       style: {
-        padding: "14px 14px 12px 14px",
+        background: "rgba(255,255,255,0.92)",
+        backdropFilter: "blur(10px)",
+        borderTop: "1px solid #e5e7eb",
+        borderLeft: "1px solid #e5e7eb",
+        borderRight: "1px solid #e5e7eb",
+        margin: "0 10px",
+        borderTopLeftRadius: "16px",
+        borderTopRightRadius: "16px",
+        padding: "10px 14px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        borderBottom: "1px solid #eef2f7",
-        background: "linear-gradient(180deg, #ffffff, #fafafa)",
+        boxShadow: "0 -10px 30px rgba(0,0,0,0.10)",
       },
     });
 
-    const headerLeft = el("div", { style: { display: "flex", gap: "10px", alignItems: "center" } }, [
+    const topLeft = el("div", {}, [
+      el("div", { style: { fontWeight: "900", color: "#111827", fontSize: "13px" } }, "Your SGI matches"),
+      el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "2px" } },
+        "Top SGI items based on your role and your company site"
+      ),
+    ]);
+
+    const closeAllBtn = el("button", {
+      type: "button",
+      style: {
+        border: "1px solid #e5e7eb",
+        background: "#fff",
+        borderRadius: "12px",
+        padding: "8px 12px",
+        fontWeight: "800",
+        cursor: "pointer",
+      },
+      onclick: () => {
+        root.remove();
+      },
+    }, "Close");
+
+    topRow.appendChild(topLeft);
+    topRow.appendChild(closeAllBtn);
+
+    // Main strip bar (fields + button + X)
+    const bar = el("div", {
+      id: "sgi-strip-bar",
+      style: {
+        background: "rgba(255,255,255,0.95)",
+        backdropFilter: "blur(10px)",
+        border: "1px solid #e5e7eb",
+        margin: "0 10px 10px 10px",
+        borderBottomLeftRadius: "16px",
+        borderBottomRightRadius: "16px",
+        padding: "12px 14px",
+        boxShadow: "0 18px 50px rgba(0,0,0,0.16)",
+      },
+    });
+
+    const grid = el("div", {
+      id: "sgi-strip-grid",
+      style: {
+        display: "grid",
+        gridTemplateColumns: "260px 1fr 240px 44px",
+        gap: "12px",
+        alignItems: "center",
+      },
+    });
+
+    // Brand block (left)
+    const brand = el("div", { style: { display: "flex", gap: "10px", alignItems: "center" } }, [
       el("div", {
         style: {
-          width: "36px",
-          height: "36px",
+          width: "40px",
+          height: "40px",
           borderRadius: "14px",
           background: "#4f46e5",
+          color: "#fff",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "#fff",
           fontWeight: "900",
         },
       }, "SGI"),
       el("div", {}, [
-        el("div", { style: { fontWeight: "900", color: "#111827", fontSize: "14px" } }, "SGI Content Finder"),
-        el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "2px", lineHeight: "1.25" } },
-          "We match SGI articles to your role + your company website."
+        el("div", { style: { fontWeight: "900", color: "#111827", fontSize: "13px", lineHeight: "1.1" } }, "SGI Content Finder"),
+        el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "2px", lineHeight: "1.1" } },
+          "Matches SGI coverage to your role + your site"
         ),
       ]),
     ]);
 
-    const closeBtn = el("button", {
+    // Job field
+    const jobWrap = el("div", {}, [
+      el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900", marginBottom: "6px" } }, "Your job title / role"),
+      el("input", {
+        id: "sgi-strip-job",
+        className: "sgi-focus",
+        type: "text",
+        placeholder: "e.g. product manager",
+        style: {
+          width: "100%",
+          padding: "12px 12px",
+          borderRadius: "14px",
+          border: "1px solid #e5e7eb",
+          background: "#fff",
+          fontSize: "13px",
+          fontWeight: "600",
+        },
+      }),
+    ]);
+
+    // Website field + button (together like screenshot)
+    const siteActions = el("div", { style: { display: "grid", gridTemplateColumns: "1fr 240px", gap: "12px", alignItems: "end" }, id: "sgi-strip-actions" });
+
+    const siteWrap = el("div", {}, [
+      el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900", marginBottom: "6px" } }, "Your company website URL"),
+      el("input", {
+        id: "sgi-strip-site",
+        className: "sgi-focus",
+        type: "text",
+        placeholder: "https://yourcompany.com",
+        style: {
+          width: "100%",
+          padding: "12px 12px",
+          borderRadius: "14px",
+          border: "1px solid #e5e7eb",
+          background: "#fff",
+          fontSize: "13px",
+          fontWeight: "600",
+        },
+      }),
+    ]);
+
+    const goBtn = el("button", {
+      type: "button",
+      id: "sgi-strip-go",
+      style: {
+        width: "100%",
+        height: "44px",
+        borderRadius: "14px",
+        border: "none",
+        background: "#4f46e5",
+        color: "#fff",
+        fontWeight: "900",
+        cursor: "pointer",
+        boxShadow: "0 10px 18px rgba(79,70,229,0.25)",
+        fontSize: "13px",
+        marginTop: "20px",
+      },
+    }, "Find SGI content for me");
+
+    siteActions.appendChild(siteWrap);
+    siteActions.appendChild(goBtn);
+
+    // Small X button (like your screenshot on right)
+    const xBtn = el("button", {
       type: "button",
       style: {
-        border: "none",
+        width: "44px",
+        height: "44px",
+        borderRadius: "14px",
+        border: "1px solid #e5e7eb",
         background: "#fff",
-        borderRadius: "12px",
-        padding: "8px 10px",
         cursor: "pointer",
-        color: "#111827",
         fontWeight: "900",
-        fontSize: "14px",
+        fontSize: "16px",
       },
-      onclick: () => {
-        panel.style.display = "none";
-        pill.style.display = "flex";
-      },
-    }, "✕");
+      onclick: () => root.remove(),
+      title: "Close",
+    }, "×");
 
-    header.appendChild(headerLeft);
-    header.appendChild(closeBtn);
+    grid.appendChild(brand);
+    grid.appendChild(jobWrap);
+    grid.appendChild(siteActions);
+    grid.appendChild(xBtn);
 
-    // Body
-    const body = el("div", {
-      style: { padding: "14px", display: "flex", flexDirection: "column", gap: "10px" },
-    });
-
-    const jobLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px" } }, "Your job title / role");
-    const jobHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: Digital marketing manager · Head of retail · Policy advisor");
-    const jobInput = el("input", {
-      id: "sgi-aiw-job",
-      type: "text",
-      placeholder: "e.g. Digital marketing manager",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
-    });
-
-    const siteLabel = el("div", { style: { color: "#111827", fontWeight: "900", fontSize: "13px", marginTop: "6px" } }, "Your company website URL");
-    const siteHint = el("div", { style: { color: "#6b7280", fontSize: "12px", marginTop: "-6px" } }, "Example: https://yourcompany.com (we scan this to understand your business)");
-    const siteInput = el("input", {
-      id: "sgi-aiw-site",
-      type: "text",
-      placeholder: "e.g. https://yourcompany.com",
-      style: { width: "100%", padding: "12px", borderRadius: "14px", border: "1px solid #e5e7eb", outline: "none", fontSize: "13px", background: "#fff" },
-    });
-
-    function focusStyle(node) {
-      node.addEventListener("focus", () => {
-        node.style.borderColor = "#c7d2fe";
-        node.style.boxShadow = "0 0 0 4px rgba(79,70,229,0.12)";
-      });
-      node.addEventListener("blur", () => {
-        node.style.borderColor = "#e5e7eb";
-        node.style.boxShadow = "none";
-      });
-    }
-    focusStyle(jobInput);
-    focusStyle(siteInput);
-
-    // Progress UI
-    const progressWrap = el("div", {
-      id: "sgi-aiw-progress",
+    // Progress row (full width under inputs) — matches your screenshot
+    const progressCard = el("div", {
       style: {
-        display: "none",
-        marginTop: "8px",
-        padding: "10px",
+        marginTop: "12px",
         border: "1px solid #e5e7eb",
         borderRadius: "14px",
-        background: "#fafafa",
+        background: "#fff",
+        padding: "10px 12px",
+        display: "none",
+      },
+      id: "sgi-strip-progress-card",
+    });
+
+    const progressTop = el("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "10px",
+        marginBottom: "8px",
       },
     });
 
-    const progressText = el("div", {
-      id: "sgi-aiw-progress-text",
-      style: { fontSize: "12px", color: "#374151", fontWeight: "900", marginBottom: "8px" },
-    }, "Starting… (0%)");
+    const progressLeft = el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900" }, id: "sgi-strip-progress-left" }, "Starting…");
+    const progressRight = el("div", { style: { fontSize: "12px", color: "#111827", fontWeight: "900" }, id: "sgi-strip-progress-right" }, "0%");
+
+    progressTop.appendChild(progressLeft);
+    progressTop.appendChild(progressRight);
 
     const progressBar = el("div", {
       style: {
@@ -436,7 +478,6 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
     });
 
     const progressFill = el("div", {
-      id: "sgi-aiw-progress-fill",
       style: {
         height: "100%",
         width: "0%",
@@ -444,116 +485,78 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         borderRadius: "999px",
         transition: "width 160ms linear",
       },
+      id: "sgi-strip-progress-fill",
     });
 
     progressBar.appendChild(progressFill);
-    progressWrap.appendChild(progressText);
-    progressWrap.appendChild(progressBar);
 
-    const animateProgress = makeProgressAnimator(progressFill, progressText);
+    const smallNote = el("div", {
+      style: { marginTop: "8px", fontSize: "12px", color: "#6b7280" },
+    }, 'We only recommend content from <b>sgieurope.com</b>.');
+    smallNote.innerHTML = 'We only recommend content from <b>sgieurope.com</b>.';
 
-    // Actions
-    const goBtn = el("button", {
-      type: "button",
-      id: "sgi-aiw-go",
-      style: {
-        width: "100%",
-        padding: "12px 14px",
-        borderRadius: "14px",
-        border: "none",
-        background: "#4f46e5",
-        color: "#fff",
-        fontWeight: "900",
-        cursor: "pointer",
-        boxShadow: "0 10px 18px rgba(79,70,229,0.25)",
-        fontSize: "13px",
-      },
-    }, "Find SGI content for me");
+    progressCard.appendChild(progressTop);
+    progressCard.appendChild(progressBar);
+    progressCard.appendChild(smallNote);
 
-    const smallNote = el("div", { style: { color: "#6b7280", fontSize: "11px", lineHeight: "1.35" } }, "We only recommend content from SGI Europe (sgieurope.com).");
-
-    // Results
+    // Results area (in bar under progress)
     const results = el("div", {
-      id: "sgi-aiw-results",
+      id: "sgi-strip-results",
       style: {
-        marginTop: "2px",
-        paddingTop: "10px",
+        marginTop: "12px",
         borderTop: "1px solid #eef2f7",
+        paddingTop: "12px",
+        display: "none",
+        maxHeight: "38vh",
         overflow: "auto",
-        maxHeight: "40vh",
       },
     });
     renderEmpty(results);
 
-    // Footer
-    const footer = el("div", {
-      style: {
-        padding: "12px 14px",
-        borderTop: "1px solid #eef2f7",
-        background: "#fafafa",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "10px",
-      },
-    });
+    // Assemble bar
+    bar.appendChild(grid);
+    bar.appendChild(progressCard);
+    bar.appendChild(results);
 
-    const powered = el("div", { style: { fontSize: "12px", color: "#6b7280" } }, "Powered by SGI Recommender");
-    const openSite = el("a", {
-      href: "https://www.sgieurope.com/",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      style: { fontSize: "12px", color: "#4f46e5", textDecoration: "none", fontWeight: "900" },
-    }, "Open SGI ↗");
+    root.appendChild(topRow);
+    root.appendChild(bar);
+    document.body.appendChild(root);
 
-    footer.appendChild(powered);
-    footer.appendChild(openSite);
+    // animator
+    const animator = makeProgressAnimator(progressFill, progressLeft, progressRight);
 
-    // Assemble
-    body.appendChild(jobLabel);
-    body.appendChild(jobHint);
-    body.appendChild(jobInput);
-    body.appendChild(siteLabel);
-    body.appendChild(siteHint);
-    body.appendChild(siteInput);
-    body.appendChild(goBtn);
-    body.appendChild(progressWrap);
-    body.appendChild(smallNote);
-    body.appendChild(results);
-
-    panel.appendChild(header);
-    panel.appendChild(body);
-    panel.appendChild(footer);
-
-    document.body.appendChild(pill);
-    document.body.appendChild(panel);
-
-    pill.addEventListener("click", () => {
-      panel.style.display = "block";
-      pill.style.display = "none";
-      jobInput.focus();
-    });
+    // Loading state
+    function setLoading(isLoading) {
+      goBtn.disabled = isLoading;
+      goBtn.style.opacity = isLoading ? "0.78" : "1";
+      goBtn.style.cursor = isLoading ? "not-allowed" : "pointer";
+      goBtn.textContent = isLoading ? "Working…" : "Find SGI content for me";
+    }
 
     async function submit() {
-      const job_title = (jobInput.value || "").trim();
-      const website_url = normalizeWebsiteUrl(siteInput.value || "");
+      const job_title = (document.getElementById("sgi-strip-job")?.value || "").trim();
+      const website_url = normalizeWebsiteUrl(document.getElementById("sgi-strip-site")?.value || "");
+
+      // show containers
+      progressCard.style.display = "block";
+      results.style.display = "block";
 
       if (!job_title || job_title.length < 2) {
+        animator.set(0, "Enter your job title…");
         renderError(results, "Please enter your job title / role.");
-        jobInput.focus();
+        document.getElementById("sgi-strip-job")?.focus();
         return;
       }
-
       if (!website_url || website_url.length < 8) {
+        animator.set(0, "Enter a valid website URL…");
         renderError(results, "Please enter a valid website URL (example: https://yourcompany.com).");
-        siteInput.focus();
+        document.getElementById("sgi-strip-site")?.focus();
         return;
       }
 
-      // show progress
-      progressWrap.style.display = "block";
-      animateProgress.reset();
-      animateProgress.set(1, "Starting…");
+      setLoading(true);
+      animator.reset();
+      animator.set(1, "Starting…");
 
       results.innerHTML = `
         <div style="padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;color:#374151;">
@@ -561,24 +564,21 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
         </div>
       `;
 
-      setLoading(goBtn, true);
-
       try {
         await postSSE(`${API_BASE}/recommend_stream`, { job_title, website_url }, (event, payload) => {
           if (event === "progress") {
             const p = payload?.percent ?? 0;
             const msg = payload?.message ?? "Working…";
-            animateProgress.set(p, msg);
+            animator.set(p, msg);
           }
 
           if (event === "error") {
-            const msg = payload?.detail || "Failed to fetch.";
-            animateProgress.set(100, "Failed");
-            renderError(results, msg);
+            animator.set(100, "Failed");
+            renderError(results, payload?.detail || "Failed to fetch.");
           }
 
           if (event === "result") {
-            animateProgress.done("Done ✅");
+            animator.done("Done ✅");
 
             const articles = payload?.articles || [];
             if (!articles.length) {
@@ -597,23 +597,21 @@ console.log("✅ SGI Europe Recommender Widget Loaded");
           }
         });
       } catch (e) {
-        console.error("🔥 Widget error:", e);
-        animateProgress.set(100, "Failed");
+        animator.set(100, "Failed");
         renderError(results, e?.message || "Failed to fetch.");
       } finally {
-        setLoading(goBtn, false);
+        setLoading(false);
       }
     }
 
     goBtn.addEventListener("click", submit);
-    jobInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); });
-    siteInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); });
 
-    window.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape" && panel.style.display !== "none") {
-        panel.style.display = "none";
-        pill.style.display = "flex";
-      }
+    // Enter submits
+    document.getElementById("sgi-strip-job").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") submit();
+    });
+    document.getElementById("sgi-strip-site").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") submit();
     });
   }
 
